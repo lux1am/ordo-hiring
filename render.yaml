@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: otbor-kandidatov
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    # Один воркер намеренно: номер строки выделяется под замком внутри
+    # процесса. Несколько воркеров могут выдать двум анкетам одну строку —
+    # см. README, раздел «Ограничение: один инстанс».
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      # Секреты задаются в панели Render, в репозиторий не попадают.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false
+      - key: SHEET_ID
+        sync: false
+      - key: WORKSHEET_NAME
+        value: Данные
+      - key: TZ_OFFSET_HOURS
+        value: "3"
+      - key: LOG_LEVEL
+        value: INFO

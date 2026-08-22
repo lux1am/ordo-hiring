@@ -1,0 +1,38 @@
+{
+  "name": "Заполнено с телефона: SUSPICIOUS не ставится, порог скорости выше",
+  "stops": {
+    "stop_1_oklad": "Да", "stop_2_komissiya": "Да", "stop_3_kasaniya": "Да",
+    "stop_4_vstrechi": "Да", "stop_5_vedenie": "Да", "stop_6_crm": "Да"
+  },
+  "answers": {
+    "q1_text": "Март: 4 сделки, 480 000 ₽, чек 120 000 ₽. Апрель: 3 сделки, 375 000 ₽, чек 125 000 ₽. Май: 4 сделки, 470 000 ₽, чек 118 000 ₽. Закрытой считал сделку после полной оплаты по акту.",
+    "q2_text": "Около 125 касаний в неделю по телефону и в мессенджерах, 13 встреч в неделю, конверсия касание-встреча 10%, сделки доводил до оплаты сам.",
+    "q3_text": "Переговоры с собственниками и ИТ-директорами: завод, ИТ-директор, 140 000 ₽; логистическая компания, собственник, 110 000 ₽. Обе сделки закрыл лично.",
+    "q4_text": "Касание-встреча 10%, встреча-бриф 65%, бриф-КП 55%, КП-оплата 32%. Цикл 40 дней, чек 120 000 ₽. Основная потеря — не выходили на экономического покупателя.",
+    "q5_text": "Логистическая компания, 110 000 ₽, ЛПР собственник, цикл 6 недель. Возражение «дорого», сравнил стоимость владения с текущим решением, проект завершён."
+  },
+  "telemetry": {
+    "is_mobile": true, "tab_switches": 4, "total_time_sec": 2100,
+    "fields": {
+      "q1_text": {"length": 185, "pasted_chars": 0, "speed_cpm": 620, "backspaces": 0},
+      "q2_text": {"length": 145, "pasted_chars": 0, "speed_cpm": 580, "backspaces": 0},
+      "q3_text": {"length": 155, "pasted_chars": 0, "speed_cpm": 640, "backspaces": 0},
+      "q4_text": {"length": 165, "pasted_chars": 0, "speed_cpm": 590, "backspaces": 0},
+      "q5_text": {"length": 150, "pasted_chars": 0, "speed_cpm": 610, "backspaces": 0}
+    }
+  },
+  "extracted": {
+    "months": [
+      {"month": "март", "deals": 4, "revenue": 480000, "avg_check": 120000},
+      {"month": "апрель", "deals": 3, "revenue": 375000, "avg_check": 125000},
+      {"month": "май", "deals": 4, "revenue": 470000, "avg_check": 118000}
+    ],
+    "conv_touch_meeting": 10, "conv_meeting_deal": 32
+  },
+  "auto_filters": {"q3_senior_dm_confirmed": true, "q1_personal_result_confirmed": true},
+  "ai_style": 40,
+  "expected": {
+    "scores": {"q1": 3, "q2": 2, "q3": 3, "q4": 3, "q5": 2},
+    "total": 13, "verdict": "A", "status": "done", "flags": ["MOBILE"]
+  }
+}

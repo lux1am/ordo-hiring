@@ -1,0 +1,38 @@
+{
+  "name": "Сильные ответы, но вставлены из буфера — A понижается до B",
+  "stops": {
+    "stop_1_oklad": "Да", "stop_2_komissiya": "Да", "stop_3_kasaniya": "Да",
+    "stop_4_vstrechi": "Да", "stop_5_vedenie": "Да", "stop_6_crm": "Да"
+  },
+  "answers": {
+    "q1_text": "Март: 5 проектов, 620 000 ₽, средний чек 124 000 ₽. Апрель: 4 проекта, 500 000 ₽, чек 125 000 ₽. Май: 4 проекта, 460 000 ₽, чек 115 000 ₽. Закрытая сделка — подписан акт и получена полная оплата.",
+    "q2_text": "135 холодных касаний в неделю, каналы: телефон, LinkedIn, корпоративная почта. 15 встреч в неделю, конверсия касание-встреча 11%, сделки доводил до оплаты самостоятельно.",
+    "q3_text": "Переговоры с собственниками и ИТ-директорами. Кейсы: производство упаковки, ИТ-директор, 180 000 ₽; сеть автосервисов, собственник, 95 000 ₽; дистрибьютор, CTO, 210 000 ₽.",
+    "q4_text": "Касание-встреча 11%, встреча-бриф 70%, бриф-КП 60%, КП-оплата 35%. Цикл 41 день, чек 120 000 ₽. Потери на согласовании бюджета у клиента.",
+    "q5_text": "Дистрибьютор автозапчастей, 210 000 ₽, ЛПР CTO, цикл 3 месяца. Возражение по цене снял расчётом TCO на два года, проект завершён и принят."
+  },
+  "telemetry": {
+    "is_mobile": false, "tab_switches": 8, "total_time_sec": 240,
+    "fields": {
+      "q1_text": {"length": 200, "pasted_chars": 190, "speed_cpm": 90, "backspaces": 3},
+      "q2_text": {"length": 175, "pasted_chars": 170, "speed_cpm": 85, "backspaces": 1},
+      "q3_text": {"length": 175, "pasted_chars": 0, "speed_cpm": 160, "backspaces": 12},
+      "q4_text": {"length": 145, "pasted_chars": 0, "speed_cpm": 155, "backspaces": 9},
+      "q5_text": {"length": 140, "pasted_chars": 0, "speed_cpm": 150, "backspaces": 11}
+    }
+  },
+  "extracted": {
+    "months": [
+      {"month": "март", "deals": 5, "revenue": 620000, "avg_check": 124000},
+      {"month": "апрель", "deals": 4, "revenue": 500000, "avg_check": 125000},
+      {"month": "май", "deals": 4, "revenue": 460000, "avg_check": 115000}
+    ],
+    "conv_touch_meeting": 11, "conv_meeting_deal": 35
+  },
+  "auto_filters": {"q3_senior_dm_confirmed": true, "q1_personal_result_confirmed": true},
+  "ai_style": 30,
+  "expected": {
+    "scores": {"q1": 3, "q2": 3, "q3": 3, "q4": 3, "q5": 3},
+    "total": 15, "verdict": "B", "status": "done", "flags": ["PASTED"]
+  }
+}

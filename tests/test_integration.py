@@ -1,0 +1,156 @@
+"""Сабмит и обработка на одном фейковом листе.
+
+Зона AO..AZ пишется дважды: /submit кладёт в неё флаги телеметрии (AS) и
+статус (AU), обработчик перезаписывает её целиком. Здесь проверяется, что
+обработчик действительно вычитывает AS и сливает флаги, а не затирает их.
+"""
+import json
+
+import pytest
+from fastapi.testclient import TestClient
+
+from HEADERS import COL_RESULT_START, HEADERS
+from app import main, pipeline
+from app.checks import FLAG_MOBILE, FLAG_PASTED
+from app.config import STATUS_DONE, STATUS_NEW
+from app.models import OPEN_FIELDS, STOP_FIELDS, ExtractorOutput, ScorerOutput
+
+ANSWER = ("Март: 4 сделки, 480 000 рублей, средний чек 120 000 рублей. "
+          "Апрель: 4 сделки, 480 000 рублей, чек 120 000 рублей. "
+          "Закрытой считал сделку после полной оплаты по акту.")
+
+
+class SharedSheet:
+    """Один лист на 54 колонки: в него пишет и /submit, и обработчик."""
+
+    def __init__(self):
+        self.cells = [""] * 54
+        self.cells[HEADERS.index("total_score")] = "=ФОРМУЛА"
+        self.result_writes = 0
+
+    # --- вызывается из main (сабмит) ---
+    def allocate_row(self):
+        return 2
+
+    def telegram_exists(self, telegram):
+        return False
+
+    def write_form(self, row, values, flags, status=STATUS_NEW):
+        for i, v in enumerate(values):
+            self.cells[i] = v
+        self.cells[HEADERS.index("flags")] = flags
+        self.cells[HEADERS.index("status")] = status
+
+    # --- вызывается из pipeline (обработка) ---
+    def read_status(self, row):
+        return self.cells[HEADERS.index("status")]
+
+    def set_status(self, row, status):
+        self.cells[HEADERS.index("status")] = status
+
+    def read_form(self, row):
+        return {name: self.cells[i] for i, name in enumerate(HEADERS[:34])}
+
+    def read_flags(self, row):
+        raw = self.cells[HEADERS.index("flags")]
+        return [f.strip() for f in str(raw).split(",") if f.strip()]
+
+    def write_result(self, row, scores, result):
+        self.result_writes += 1
+        if scores is not None:
+            for i, v in enumerate(scores):
+                self.cells[34 + i] = v
+        for i, v in enumerate(result):
+            self.cells[COL_RESULT_START - 1 + i] = v
+
+    def get(self, name):
+        return self.cells[HEADERS.index(name)]
+
+
+@pytest.fixture
+def sheet(monkeypatch):
+    shared = SharedSheet()
+    for fn in ("allocate_row", "telegram_exists", "write_form", "write_result"):
+        monkeypatch.setattr(main.sheets, fn, getattr(shared, fn))
+    for fn in ("read_status", "set_status", "read_form", "read_flags", "write_result"):
+        monkeypatch.setattr(pipeline.sheets, fn, getattr(shared, fn))
+    monkeypatch.setattr(main.recovery, "start_scanner", lambda: None)
+    monkeypatch.setattr(main.recovery, "recover", lambda **kw: [])
+
+    # По умолчанию экстрактор отрабатывает штатно: два полных месяца, чтобы
+    # анкета доходила до статуса done, а не уходила в manual по NO_NUMBERS.
+    monkeypatch.setattr(pipeline, "extract", lambda *a, **k: ExtractorOutput.model_validate({
+        "months": [
+            {"month": "март", "deals": 4, "revenue": 480000, "avg_check": 120000},
+            {"month": "апрель", "deals": 4, "revenue": 480000, "avg_check": 120000},
+        ],
+        "conv_touch_meeting": 11, "conv_meeting_deal": 30,
+    }))
+    monkeypatch.setattr(pipeline, "score", lambda answers: (ScorerOutput(
+        scores={k: 2 for k in ["q1", "q2", "q3", "q4", "q5"]},
+        evidence={k: "цитата" for k in ["q1", "q2", "q3", "q4", "q5"]},
+        auto_filters={"q3_senior_dm_confirmed": True, "q1_personal_result_confirmed": True},
+        ai_style=25, ai_markers=[], screening_questions=["а", "б", "в"],
+    ), []))
+
+    pipeline._row_locks.clear()
+    main.ratelimit._hits.clear()
+    return shared
+
+
+def payload(is_mobile: bool, pasted: int = 0):
+    data = {
+        "fio": "Иванов Иван Иванович",
+        "telegram": "@ivanov",
+        "resume_url": "https://hh.ru/resume/123",
+        "pdn_consent": "1",
+        "telemetry": json.dumps({
+            "is_mobile": is_mobile, "tab_switches": 2, "total_time_sec": 1200,
+            "fields": {f: {"length": 200, "pasted_chars": pasted,
+                           "speed_cpm": 150, "backspaces": 20} for f in OPEN_FIELDS},
+        }),
+    }
+    data.update({f: "Да" for f in STOP_FIELDS})
+    data.update({f: ANSWER for f in OPEN_FIELDS})
+    return data
+
+
+def test_telemetry_flags_survive_processor_write(sheet):
+    """MOBILE записан при сабмите и должен пережить запись обработчика.
+
+    TestClient выполняет BackgroundTasks синхронно, поэтому к возврату из
+    post обработка уже прошла — это полный путь анкеты, а не его половина.
+    """
+    with TestClient(main.app) as c:
+        r = c.post("/submit", data=payload(is_mobile=True))
+    assert r.status_code == 200
+    assert sheet.result_writes == 1, "обработчик должен был отработать в фоне"
+
+    final = sheet.read_flags(2)
+    assert FLAG_MOBILE in final, "обработчик затёр флаг телеметрии из AS"
+    assert sheet.get("status") == STATUS_DONE
+    assert sheet.get("total_score") == "=ФОРМУЛА", "формула затёрта"
+    assert "заполнено с телефона" in sheet.get("flags_ru")
+    assert sheet.get("score_q1") == 2, "баллы записаны"
+
+    # Идемпотентность на реальном пути: повторный запуск ничего не меняет.
+    pipeline.process_row(2)
+    assert sheet.result_writes == 1
+
+
+def test_processor_merges_own_flags_with_telemetry(sheet, monkeypatch):
+    """Свои флаги обработчик добавляет к вычитанным, а не заменяет ими."""
+    # Экстрактор молчит — обработчик добавит свой NO_NUMBERS к флагам сабмита.
+    monkeypatch.setattr(pipeline, "extract", lambda *a, **k: None)
+    with TestClient(main.app) as c:
+        c.post("/submit", data=payload(is_mobile=True, pasted=180))
+
+    final = set(sheet.read_flags(2))
+    assert {FLAG_MOBILE, FLAG_PASTED} <= final, "флаги сабмита потеряны"
+    assert "NO_NUMBERS" in final, "флаг обработчика не добавлен"
+
+
+def test_desktop_submit_has_no_mobile_flag(sheet):
+    with TestClient(main.app) as c:
+        c.post("/submit", data=payload(is_mobile=False))
+    assert FLAG_MOBILE not in sheet.read_flags(2)
