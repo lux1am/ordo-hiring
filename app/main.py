@@ -1,4 +1,13 @@
-"""FastAPI-приложение: форма, приём анкеты, запуск обработки."""
+"""FastAPI-приложение: форма, приём анкеты, запуск обработки.
+
+НЕ ИСПОЛЬЗУЕТСЯ при деплое на Google Apps Script — там форму отдаёт
+apps-script/Code.gs, а строку пишет doPost напрямую через SpreadsheetApp.
+Модуль оставлен для варианта с веб-сервером на Render; см. README, раздел
+«Два варианта деплоя». Тесты его по-прежнему покрывают, чтобы вариант
+оставался рабочим.
+
+Обработка при варианте с Apps Script запускается отдельно — process_new.py.
+"""
 import json
 import logging
 from contextlib import asynccontextmanager

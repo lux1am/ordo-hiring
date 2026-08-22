@@ -1,6 +1,18 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Секреты — не коммитить никогда
 .env
 *.pem
-credentials.json
+credentials*.json
 service-account*.json
-__pycache__/
-.venv/
+.clasprc.json
+
+# clasp / npm
+node_modules/
+
+# macOS
+.DS_Store

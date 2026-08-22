@@ -1,0 +1,49 @@
+name: worker
+
+# Обработка анкет со статусом new. Форму отдаёт Apps Script, веб-сервера с
+# фоновыми задачами нет — скоринг запускается отсюда по расписанию.
+
+on:
+  schedule:
+    # Каждые 10 минут. На бесплатном тарифе GitHub может задержать запуск
+    # на несколько минут при общей нагрузке — см. README.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+# Два прогона не должны делить между собой одни и те же строки. Отменять
+# идущий нельзя: он оставил бы строки в processing на середине обработки,
+# поэтому новый запуск ждёт завершения предыдущего.
+concurrency:
+  group: worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    # Зависший вызов API не должен жечь минуты Actions. Прерванный по
+    # таймауту прогон безопасен: строки останутся в processing, и следующий
+    # запуск вернёт их в работу.
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Установка зависимостей
+        run: pip install -r requirements.txt
+
+      - name: Обработка анкет
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          WORKSHEET_NAME: ${{ vars.WORKSHEET_NAME || 'Данные' }}
+          TZ_OFFSET_HOURS: ${{ vars.TZ_OFFSET_HOURS || '3' }}
+        run: python process_new.py

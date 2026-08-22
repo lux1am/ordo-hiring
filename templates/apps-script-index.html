@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title><?= QUESTIONS.title ?></title>
+<style>
+/*__CSS__*/
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><?= QUESTIONS.title ?></h1>
+    <p class="intro"><?= QUESTIONS.intro ?></p>
+  </header>
+
+  <form method="post" action="<?= formUrl ?>" id="form" novalidate>
+    <div class="hp" aria-hidden="true">
+      <label for="<?= honeypot ?>">Не заполняйте это поле</label>
+      <input type="text" id="<?= honeypot ?>" name="<?= honeypot ?>" tabindex="-1" autocomplete="off">
+    </div>
+
+    <section>
+      <h2>О себе</h2>
+      <div class="field">
+        <label for="fio">Фамилия, имя и отчество</label>
+        <input type="text" id="fio" name="fio" autocomplete="name" required>
+      </div>
+      <div class="field">
+        <label for="telegram">Telegram</label>
+        <div class="hint">Например, @username</div>
+        <input type="text" id="telegram" name="telegram" autocomplete="off" required>
+      </div>
+      <div class="field">
+        <label for="resume_url">Ссылка на резюме</label>
+        <div class="hint">hh.ru, LinkedIn, Google Docs или любая открытая ссылка</div>
+        <input type="url" id="resume_url" name="resume_url" required>
+      </div>
+    </section>
+
+    <section>
+      <h2>Условия работы</h2>
+      <? for (var i = 0; i < QUESTIONS.stop_questions.length; i++) {
+           var sq = QUESTIONS.stop_questions[i]; ?>
+      <div class="stop-q">
+        <div class="q-text"><?= sq.text ?></div>
+        <div class="radio-row">
+          <label>
+            <input type="radio" name="<?= sq.field ?>" value="Да" required><span>Да</span>
+          </label>
+          <label>
+            <input type="radio" name="<?= sq.field ?>" value="Нет" required><span>Нет</span>
+          </label>
+        </div>
+      </div>
+      <? } ?>
+    </section>
+
+    <section>
+      <h2>Опыт</h2>
+      <? for (var j = 0; j < QUESTIONS.open_questions.length; j++) {
+           var oq = QUESTIONS.open_questions[j]; ?>
+      <div class="field">
+        <span class="q-num"><?= oq.label ?></span>
+        <div class="q-text"><?= oq.text ?></div>
+        <textarea id="<?= oq.field ?>" name="<?= oq.field ?>" data-telemetry="<?= oq.field ?>"
+          <? if (oq.max_length) { ?>maxlength="<?= oq.max_length ?>"<? } ?>
+          required></textarea>
+        <div class="counter" data-counter-for="<?= oq.field ?>"></div>
+      </div>
+      <? } ?>
+    </section>
+
+    <section>
+      <div class="consent">
+        <input type="checkbox" id="pdn_consent" name="pdn_consent" value="1" required>
+        <label for="pdn_consent"><?= QUESTIONS.consent_text ?></label>
+      </div>
+    </section>
+
+    <input type="hidden" name="telemetry" id="telemetry">
+    <button type="submit" id="submit-btn">Отправить анкету</button>
+  </form>
+</div>
+
+<script>
+//__JS__
+</script>
+</body>
+</html>

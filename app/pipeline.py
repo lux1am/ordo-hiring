@@ -101,19 +101,30 @@ def build_result_row(
 
 # ---------------------------- обработка -----------------------------------
 
-def process_row(row: int) -> None:
-    """Обрабатывает одну строку. Повторная обработка невозможна."""
+# Исходы обработки — из них складывается сводка прогона.
+OUTCOME_BUSY = "busy"        # строку уже обрабатывает другой поток
+OUTCOME_SKIPPED = "skipped"  # статус не new, обрабатывать нечего
+OUTCOME_FAILED = "failed"    # упало исключение, строка осталась в processing
+
+
+def process_row(row: int) -> str:
+    """Обрабатывает одну строку и возвращает исход.
+
+    Возврат нужен для сводки прогона: в варианте с Apps Script логи
+    GitHub Actions — единственное окно наблюдения за конвейером.
+    """
     lock = _row_lock(row)
     if not lock.acquire(blocking=False):
         log.info("строка %d уже обрабатывается в этом процессе, пропускаю", row)
-        return
+        return OUTCOME_BUSY
     try:
         if not _claim(row):
-            return
-        _process(row)
+            return OUTCOME_SKIPPED
+        return _process(row)
     except Exception:
         # Строка остаётся в processing и будет подобрана сканером зависших.
         log.exception("строка %d: обработка упала", row)
+        return OUTCOME_FAILED
     finally:
         mark_released(row)
         lock.release()
@@ -137,7 +148,7 @@ def _claim(row: int) -> bool:
     return True
 
 
-def _process(row: int) -> None:
+def _process(row: int) -> str:
     form = sheets.read_form(row)
     answers = {f: str(form.get(f, "")).strip() for f in OPEN_FIELDS}
     stops = {f: str(form.get(f, "")).strip() for f in STOP_FIELDS}
@@ -163,7 +174,7 @@ def _process(row: int) -> None:
                 flags_text=ru.flags_ru(flags, ["отказ по условиям работы"]),
             ),
         )
-        return
+        return STATUS_DONE
 
     conditions = ru.conditions_ru([])
     manual_reasons: list[str] = []
@@ -192,7 +203,7 @@ def _process(row: int) -> None:
             conditions=conditions,
             reasons=[SCORER_FAILED_RU, f"техническая причина: {e}"] + manual_reasons,
         )
-        return
+        return STATUS_MANUAL
 
     if not result.auto_filters.q1_personal_result_confirmed:
         manual_reasons.append("по вопросу 1 не подтверждён личный результат")
@@ -232,10 +243,12 @@ def _process(row: int) -> None:
             flags_text=ru.flags_ru(flags, reasons),
         ),
     )
+    status = STATUS_MANUAL if is_manual else STATUS_DONE
     log.info(
         "строка %d: готово — вердикт %s, сумма %d, статус %s",
-        row, verdict_out, v.total, STATUS_MANUAL if is_manual else STATUS_DONE,
+        row, verdict_out, v.total, status,
     )
+    return status
 
 
 def _write_manual(row: int, *, flags: list[str], conditions: str, reasons: list[str]) -> None:

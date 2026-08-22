@@ -191,14 +191,18 @@ def telegram_exists(telegram: str) -> bool:
     return any(str(v).strip().lstrip("@").lower() == needle for v in column)
 
 
-def rows_in_processing() -> list[int]:
-    """Номера строк со статусом processing."""
+def rows_with_status(status: str) -> list[int]:
+    """Номера строк с указанным статусом."""
     column = worksheet().col_values(COL_STATUS)
     return [
         i
         for i, v in enumerate(column, start=1)
-        if i >= FIRST_DATA_ROW and str(v).strip() == STATUS_PROCESSING
+        if i >= FIRST_DATA_ROW and str(v).strip() == status
     ]
+
+
+def rows_in_processing() -> list[int]:
+    return rows_with_status(STATUS_PROCESSING)
 
 
 def ensure_header() -> None:

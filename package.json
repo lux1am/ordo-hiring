@@ -1,0 +1,19 @@
+{
+  "name": "otbor-kandidatov",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Деплой формы отбора кандидатов в Google Apps Script через clasp",
+  "scripts": {
+    "login": "clasp login",
+    "build": "python3 apps-script/build_gs.py",
+    "check": "python3 apps-script/build_gs.py --check",
+    "push": "npm run build && clasp -I apps-script/.claspignore push",
+    "deploy": "npm run push && clasp -I apps-script/.claspignore deploy",
+    "deployments": "clasp list-deployments",
+    "open": "clasp open-script",
+    "logs": "clasp tail-logs"
+  },
+  "devDependencies": {
+    "@google/clasp": "^3.4.0"
+  }
+}

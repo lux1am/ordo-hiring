@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title><?= QUESTIONS.title ?></title>
+<style>
+  :root {
+    --bg: #f5f5f4;
+    --card: #ffffff;
+    --text: #1c1917;
+    --muted: #57534e;
+    --line: #d6d3d1;
+    --accent: #1c1917;
+    --error-bg: #fef2f2;
+    --error-line: #dc2626;
+    --error-text: #991b1b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 64px;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 700px; margin: 0 auto; }
+  header { margin-bottom: 24px; }
+  h1 { font-size: 24px; line-height: 1.25; margin: 0 0 12px; font-weight: 650; }
+  .intro { color: var(--muted); margin: 0; }
+  section {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--muted);
+    margin: 0 0 16px;
+    font-weight: 600;
+  }
+  label { display: block; font-weight: 550; margin-bottom: 6px; }
+  .hint { color: var(--muted); font-size: 14px; font-weight: 400; margin-bottom: 8px; }
+  .field { margin-bottom: 20px; }
+  .field:last-child { margin-bottom: 0; }
+  input[type=text], input[type=url], textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--text);
+    font: inherit;
+    font-size: 16px; /* меньше 16px — iOS зумит страницу при фокусе */
+  }
+  input:focus, textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+    border-color: var(--accent);
+  }
+  textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
+  .counter { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .q-text { font-weight: 400; color: var(--text); margin-bottom: 10px; }
+  .q-num { font-weight: 650; display: block; margin-bottom: 4px; }
+  .radio-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .radio-row label {
+    flex: 1 1 120px;
+    margin: 0;
+    padding: 11px 14px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    text-align: center;
+    cursor: pointer;
+    font-weight: 500;
+    background: #fff;
+    user-select: none;
+  }
+  .radio-row input { position: absolute; opacity: 0; pointer-events: none; }
+  .radio-row input:checked + span { font-weight: 650; }
+  .radio-row label:has(input:checked) {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+    background: #fafaf9;
+  }
+  .stop-q { padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+  .stop-q:last-child { border-bottom: 0; padding-bottom: 0; margin-bottom: 0; }
+  .consent { display: flex; gap: 10px; align-items: flex-start; }
+  .consent input { margin-top: 4px; width: 18px; height: 18px; flex-shrink: 0; }
+  .consent label { font-weight: 400; margin: 0; }
+  button {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+    border-radius: 6px;
+    font: inherit;
+    font-weight: 600;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: .55; cursor: default; }
+  .error {
+    background: var(--error-bg);
+    border: 1px solid var(--error-line);
+    border-left-width: 3px;
+    color: var(--error-text);
+    padding: 14px 16px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+  }
+  /* Приманка для ботов: невидима для человека, но не hidden — часть автозаполнялок его пропускает. */
+  .hp {
+    position: absolute; left: -9999px; width: 1px; height: 1px;
+    overflow: hidden; opacity: 0;
+  }
+  @media (max-width: 560px) {
+    body { padding: 16px 12px 48px; }
+    section { padding: 16px; border-radius: 6px; }
+    h1 { font-size: 21px; }
+    .radio-row label { flex: 1 1 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><?= QUESTIONS.title ?></h1>
+    <p class="intro"><?= QUESTIONS.intro ?></p>
+  </header>
+
+  <form method="post" action="<?= formUrl ?>" id="form" novalidate>
+    <div class="hp" aria-hidden="true">
+      <label for="<?= honeypot ?>">Не заполняйте это поле</label>
+      <input type="text" id="<?= honeypot ?>" name="<?= honeypot ?>" tabindex="-1" autocomplete="off">
+    </div>
+
+    <section>
+      <h2>О себе</h2>
+      <div class="field">
+        <label for="fio">Фамилия, имя и отчество</label>
+        <input type="text" id="fio" name="fio" autocomplete="name" required>
+      </div>
+      <div class="field">
+        <label for="telegram">Telegram</label>
+        <div class="hint">Например, @username</div>
+        <input type="text" id="telegram" name="telegram" autocomplete="off" required>
+      </div>
+      <div class="field">
+        <label for="resume_url">Ссылка на резюме</label>
+        <div class="hint">hh.ru, LinkedIn, Google Docs или любая открытая ссылка</div>
+        <input type="url" id="resume_url" name="resume_url" required>
+      </div>
+    </section>
+
+    <section>
+      <h2>Условия работы</h2>
+      <? for (var i = 0; i < QUESTIONS.stop_questions.length; i++) {
+           var sq = QUESTIONS.stop_questions[i]; ?>
+      <div class="stop-q">
+        <div class="q-text"><?= sq.text ?></div>
+        <div class="radio-row">
+          <label>
+            <input type="radio" name="<?= sq.field ?>" value="Да" required><span>Да</span>
+          </label>
+          <label>
+            <input type="radio" name="<?= sq.field ?>" value="Нет" required><span>Нет</span>
+          </label>
+        </div>
+      </div>
+      <? } ?>
+    </section>
+
+    <section>
+      <h2>Опыт</h2>
+      <? for (var j = 0; j < QUESTIONS.open_questions.length; j++) {
+           var oq = QUESTIONS.open_questions[j]; ?>
+      <div class="field">
+        <span class="q-num"><?= oq.label ?></span>
+        <div class="q-text"><?= oq.text ?></div>
+        <textarea id="<?= oq.field ?>" name="<?= oq.field ?>" data-telemetry="<?= oq.field ?>"
+          <? if (oq.max_length) { ?>maxlength="<?= oq.max_length ?>"<? } ?>
+          required></textarea>
+        <div class="counter" data-counter-for="<?= oq.field ?>"></div>
+      </div>
+      <? } ?>
+    </section>
+
+    <section>
+      <div class="consent">
+        <input type="checkbox" id="pdn_consent" name="pdn_consent" value="1" required>
+        <label for="pdn_consent"><?= QUESTIONS.consent_text ?></label>
+      </div>
+    </section>
+
+    <input type="hidden" name="telemetry" id="telemetry">
+    <button type="submit" id="submit-btn">Отправить анкету</button>
+  </form>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Телефон определяем по типу указателя, а не только по user-agent:
+  // на мобильных Backspace через keydown приходит нестабильно, а свайп-ввод
+  // и автозамена дают такую скорость набора, что порог для настольных
+  // браузеров срабатывал бы почти на всех.
+  var isMobile = (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
+                 /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+  var PAUSE_MS = 5000;   // пауза дольше пяти секунд не считается временем набора
+  var startedAt = Date.now();
+  var tabSwitches = 0;
+  var hiddenAt = null;
+  var fieldAtHide = null;
+  var pendingAway = {};  // поле -> длительность последнего ухода, ещё не привязанная к вводу
+  var currentField = null;
+  var stats = {};
+
+  function statsFor(name) {
+    if (!stats[name]) {
+      stats[name] = {
+        length: 0, pasted_chars: 0, backspaces: 0,
+        active_ms: 0, last_input: 0, away_before_input_sec: 0
+      };
+    }
+    return stats[name];
+  }
+
+  var areas = document.querySelectorAll("textarea[data-telemetry]");
+
+  Array.prototype.forEach.call(areas, function (el) {
+    var name = el.getAttribute("data-telemetry");
+    var s = statsFor(name);
+    var counter = document.querySelector('[data-counter-for="' + name + '"]');
+
+    function renderCounter() {
+      if (!counter) return;
+      var max = el.getAttribute("maxlength");
+      counter.textContent = max
+        ? el.value.length + " из " + max + " знаков"
+        : el.value.length + " знаков";
+    }
+    renderCounter();
+
+    el.addEventListener("focus", function () { currentField = name; });
+
+    el.addEventListener("paste", function (e) {
+      var text = (e.clipboardData || window.clipboardData);
+      s.pasted_chars += text ? (text.getData("text") || "").length : 0;
+    });
+
+    el.addEventListener("keydown", function (e) {
+      if (e.key === "Backspace" || e.keyCode === 8) s.backspaces++;
+    });
+
+    el.addEventListener("input", function () {
+      var now = Date.now();
+      if (s.last_input) {
+        var dt = now - s.last_input;
+        if (dt > 0) s.active_ms += Math.min(dt, PAUSE_MS);
+      }
+      s.last_input = now;
+
+      // Кандидат уходил со вкладки, вернулся и дописывает именно это поле.
+      if (pendingAway[name]) {
+        s.away_before_input_sec = Math.max(s.away_before_input_sec, pendingAway[name]);
+        pendingAway[name] = 0;
+      }
+      s.length = el.value.length;
+      renderCounter();
+    });
+  });
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      tabSwitches++;
+      hiddenAt = Date.now();
+      fieldAtHide = currentField;
+    } else if (hiddenAt) {
+      var away = (Date.now() - hiddenAt) / 1000;
+      if (fieldAtHide) {
+        pendingAway[fieldAtHide] = Math.max(pendingAway[fieldAtHide] || 0, away);
+      }
+      hiddenAt = null;
+      fieldAtHide = null;
+    }
+  });
+
+  document.getElementById("form").addEventListener("submit", function () {
+    var fields = {};
+    Object.keys(stats).forEach(function (name) {
+      var s = stats[name];
+      var minutes = s.active_ms / 60000;
+      fields[name] = {
+        length: s.length,
+        pasted_chars: Math.min(s.pasted_chars, s.length),
+        speed_cpm: minutes > 0 ? Math.round(s.length / minutes) : 0,
+        backspaces: s.backspaces,
+        away_before_input_sec: Math.round(s.away_before_input_sec)
+      };
+    });
+
+    document.getElementById("telemetry").value = JSON.stringify({
+      is_mobile: isMobile,
+      tab_switches: tabSwitches,
+      total_time_sec: Math.round((Date.now() - startedAt) / 1000),
+      fields: fields
+    });
+
+    var btn = document.getElementById("submit-btn");
+    btn.disabled = true;
+    btn.textContent = "Отправляем…";
+  });
+})();
+</script>
+</body>
+</html>
