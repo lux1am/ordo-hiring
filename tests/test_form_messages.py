@@ -44,19 +44,71 @@ def run(js: str) -> list:
 
 # ------------------------------ счётчик -----------------------------------
 
+def state(length, min_length=80, max_length=0) -> dict:
+    js = f"console.log(JSON.stringify([counterState({length}, {min_length}, {max_length})]))"
+    return run(js)[0]
+
+
 @pytest.mark.parametrize(
     "length,expected",
     [
         (0, "минимум 80 знаков"),
-        (1, "осталось 79 знаков"),
-        (78, "осталось 2 знака"),
-        (79, "остался 1 знак"),
-        (80, "минимум набран"),
-        (200, "минимум набран"),
+        (1, "ещё 79 знаков до минимума"),
+        (78, "ещё 2 знака до минимума"),
+        (79, "ещё 1 знак до минимума"),
+        (80, "достаточно"),
+        (200, "достаточно"),
     ],
 )
 def test_counter_text(length, expected):
-    assert run(f"console.log(JSON.stringify([counterText({length}, 80)]))") == [expected]
+    """Ниже минимума счётчик считает недобор, выше — не считает вовсе."""
+    assert state(length)["text"] == expected
+
+
+@pytest.mark.parametrize("length", [80, 200, 599])
+def test_counter_hides_numbers_once_minimum_is_reached(length):
+    """Цифра после минимума читалась бы как остаток лимита."""
+    s = state(length, max_length=700)
+    assert s["text"] == "достаточно"
+    assert s["cls"] == "counter ok"
+
+
+@pytest.mark.parametrize(
+    "length,expected",
+    [
+        (601, "осталось 99 знаков до предела"),
+        (698, "осталось 2 знака до предела"),
+        (699, "остался 1 знак до предела"),
+        (700, "осталось 0 знаков до предела"),
+    ],
+)
+def test_counter_warns_near_limit(length, expected):
+    """У предела число возвращается, но уже с обратным смыслом."""
+    s = state(length, max_length=700)
+    assert s["text"] == expected
+    assert s["cls"] == "counter limit"
+
+
+def test_limit_warning_starts_exactly_at_100():
+    assert state(600, max_length=700)["text"] == "достаточно"
+    assert state(601, max_length=700)["cls"] == "counter limit"
+
+
+def test_no_limit_no_warning():
+    """У вопросов без верхнего предела оранжевого состояния не бывает."""
+    assert state(100000)["cls"] == "counter ok"
+
+
+@pytest.mark.parametrize(
+    "length,expected",
+    [
+        (0, "counter"),
+        (79, "counter"),
+        (80, "counter ok"),
+    ],
+)
+def test_counter_colors(length, expected):
+    assert state(length)["cls"] == expected
 
 
 @pytest.mark.parametrize(

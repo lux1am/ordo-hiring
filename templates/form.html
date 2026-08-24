@@ -78,6 +78,7 @@
   textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
   .counter { font-size: 13px; color: var(--muted); margin-top: 6px; }
   .counter.ok { color: #15803d; }
+  .counter.limit { color: #c2410c; }
   .field-error {
     font-size: 14px;
     color: var(--error-text);
@@ -310,13 +311,31 @@ window.submitPayload = function (data) {
     return text.charAt(0).toUpperCase() + text.slice(1);
   }
 
-  // Счётчик показывает требование, а не прогресс: пока поле пустое — сколько
-  // нужно, дальше — сколько осталось, после порога — что минимум взят.
-  function counterText(length, min) {
-    if (length >= min) return "минимум набран";
-    if (length === 0) return "минимум " + chars(min);
-    return pluralRu(min - length, "остался", "осталось", "осталось") +
-      " " + chars(min - length);
+  // За сколько знаков до верхнего предела счётчик начинает предупреждать.
+  var LIMIT_WARN = 100;
+
+  function shortfallText(missing) {
+    return "ещё " + chars(missing) + " до минимума";
+  }
+
+  // Счётчик показывает требование, а не остаток лимита: пока минимума нет —
+  // сколько ещё нужно, после порога — просто что хватит, без цифр. Число
+  // возвращается только у верхнего предела, и там оно значит обратное —
+  // сколько ещё влезет. Поэтому предел проверяется первым: у поля с узким
+  // окном упереться в потолок можно раньше, чем взят минимум, и знать об
+  // этом важнее.
+  function counterState(length, min, max) {
+    if (max && max - length < LIMIT_WARN) {
+      var left = Math.max(0, max - length);
+      return {
+        text: pluralRu(left, "остался", "осталось", "осталось") +
+          " " + chars(left) + " до предела",
+        cls: "counter limit"
+      };
+    }
+    if (length >= min) return { text: "достаточно", cls: "counter ok" };
+    if (length === 0) return { text: "минимум " + chars(min), cls: "counter" };
+    return { text: shortfallText(min - length), cls: "counter" };
   }
 
   var REQUIRED_TEXT = "Заполните это поле";
@@ -350,6 +369,9 @@ window.submitPayload = function (data) {
     var counter = document.querySelector('[data-counter-for="' + name + '"]');
 
     var min = parseInt(el.getAttribute("data-min"), 10) || 0;
+    // Предел берётся из maxlength — того же атрибута, которым браузер сам
+    // обрезает ввод, чтобы счётчик и поле не расходились в том, где потолок.
+    var max = parseInt(el.getAttribute("maxlength"), 10) || 0;
 
     // Счётчик и проверка длины идут по нормализованной строке — ровно так
     // же, как считает сервер. Иначе ответ из 80 знаков с двойными пробелами
@@ -357,15 +379,16 @@ window.submitPayload = function (data) {
     function renderCounter() {
       var length = normalize(el.value).length;
       if (counter) {
-        counter.textContent = min ? counterText(length, min) : "";
-        counter.className = length >= min ? "counter ok" : "counter";
+        var state = counterState(length, min, max);
+        counter.textContent = min || max ? state.text : "";
+        counter.className = state.cls;
       }
       // Пустому полю про минимум говорить рано — это обычное «не заполнено».
       // Проверка идёт раньше сравнения с min: при min = 0 пустое поле иначе
       // осталось бы без своего текста, и браузер показал бы английский.
       el.setCustomValidity(
         length === 0 ? (el.required ? REQUIRED_TEXT : "") :
-        length >= min ? "" : capitalize(counterText(length, min))
+        length >= min ? "" : capitalize(shortfallText(min - length))
       );
     }
     renderCounter();

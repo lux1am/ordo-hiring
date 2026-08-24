@@ -294,12 +294,13 @@ def test_length_check_uses_normalize():
 def test_counter_shows_requirement_not_progress():
     """Счётчик говорит, сколько нужно, а не сколько набрано."""
     shared = block("<script data-shared>", FORM_HTML)
-    assert '"минимум набран"' in shared
+    assert '"достаточно"' in shared
     assert '"минимум " + chars(min)' in shared
     assert '"остался", "осталось", "осталось"' in shared, "нет склонения «знак»"
     assert 'length + "/" + min' not in shared, "счётчик «0/80» вернулся"
-    assert 'length >= min ? "counter ok" : "counter"' in shared
-    assert ".counter.ok" in block("<style>", FORM_HTML, "</style>")
+    style = block("<style>", FORM_HTML, "</style>")
+    assert ".counter.ok" in style
+    assert ".counter.limit" in style, "нет цвета для остатка до предела"
 
 
 def test_all_validation_states_have_russian_text():
