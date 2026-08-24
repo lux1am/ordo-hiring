@@ -10,9 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # --- Модели ---------------------------------------------------------------
 SCORER_MODEL = os.getenv("SCORER_MODEL", "claude-sonnet-4-6")
-EXTRACTOR_MODEL = os.getenv("EXTRACTOR_MODEL", "claude-haiku-4-5")
 SCORER_MAX_TOKENS = int(os.getenv("SCORER_MAX_TOKENS", "4000"))
-EXTRACTOR_MAX_TOKENS = int(os.getenv("EXTRACTOR_MAX_TOKENS", "1500"))
 
 # --- Секреты --------------------------------------------------------------
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -30,7 +28,10 @@ MATH_TOLERANCE = float(os.getenv("MATH_TOLERANCE", "0.10"))
 CONVERSION_OUTLIER_THRESHOLD = float(os.getenv("CONVERSION_OUTLIER_THRESHOLD", "50"))
 AI_STYLE_DOWNGRADE_THRESHOLD = int(os.getenv("AI_STYLE_DOWNGRADE_THRESHOLD", "70"))
 EVIDENCE_MAX_WORDS = int(os.getenv("EVIDENCE_MAX_WORDS", "15"))
-Q1_MIN_CONFIRMED_MONTHS = int(os.getenv("Q1_MIN_CONFIRMED_MONTHS", "2"))
+# Балл 3 за Q1: не меньше трёх сделок в каждом месяце и средние чеки в одном
+# диапазоне — максимум не выше двойного минимума.
+Q1_STABLE_MIN_DEALS = int(os.getenv("Q1_STABLE_MIN_DEALS", "3"))
+Q1_CHECK_SPREAD_MAX = float(os.getenv("Q1_CHECK_SPREAD_MAX", "2"))
 
 # --- Пороги вердикта ------------------------------------------------------
 VERDICT_A_MIN = int(os.getenv("VERDICT_A_MIN", "12"))
@@ -84,11 +85,6 @@ def load_system_prompt() -> str:
         rubric = (BASE_DIR / "rubric" / f"q{i}.md").read_text(encoding="utf-8")
         parts.append(f"\n\n---\n\n{rubric}")
     return "".join(parts)
-
-
-@lru_cache(maxsize=1)
-def load_extractor_prompt() -> str:
-    return (BASE_DIR / "prompts" / "extractor.md").read_text(encoding="utf-8")
 
 
 def missing_secrets() -> list[str]:

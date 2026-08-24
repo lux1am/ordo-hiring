@@ -17,6 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import ANTHROPIC_API_KEY, SCORER_MODEL, setup_logging  # noqa: E402
 from app.models import QKEYS  # noqa: E402
 from app.scorer import ScoringFailed, score  # noqa: E402
+from app.checks import q1_score  # noqa: E402
+from app.numbers import parse_q1  # noqa: E402
 from app.verdict import decide  # noqa: E402
 from tests.conftest import load_fixtures  # noqa: E402
 
@@ -76,10 +78,15 @@ def main(argv: list[str]) -> int:
             continue
 
         scored_rows += 1
+        # Балл за q1 модель не ставит — его считает код по числам из ячейки.
+        numbers, _ = parse_q1(f["answers"]["q1_text"])
+        scores = dict(result.scores)
+        scores["q1"] = q1_score(numbers, result.auto_filters.q1_definition_ok)
+
         row_deltas = []
         cells = []
         for q in QKEYS:
-            want, got = exp["scores"][q], result.scores[q]
+            want, got = exp["scores"][q], scores[q]
             row_deltas.append(got - want)
             cells.append(f"{cell(want, got):>21}")
         deltas.extend(row_deltas)
@@ -87,7 +94,7 @@ def main(argv: list[str]) -> int:
             exact_rows += 1
 
         v = decide(
-            scores=result.scores,
+            scores=scores,
             flags=exp["flags"],
             ai_style=result.ai_style,
             q3_senior_dm_confirmed=result.auto_filters.q3_senior_dm_confirmed,

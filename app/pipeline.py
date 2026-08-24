@@ -17,8 +17,8 @@ from app.config import (
     STATUS_PROCESSING,
     TZ_OFFSET_HOURS,
 )
-from app.extractor import extract
-from app.models import OPEN_FIELDS, STOP_FIELDS, QKEYS, Submission
+from app.models import MODEL_QKEYS, OPEN_FIELDS, QKEYS, STOP_FIELDS, Submission
+from app.numbers import parse_q1, parse_q4
 from app.recovery import mark_claimed, mark_released
 from app.scorer import ScoringFailed, score
 from app.verdict import decide, screening_additions
@@ -177,17 +177,14 @@ def _process(row: int) -> str:
         return STATUS_DONE
 
     conditions = ru.conditions_ru([])
-    manual_reasons: list[str] = []
 
-    # 2. Числа из Q1 и Q4 — дешёвый вызов, дальше арифметика в чистом коде.
-    extracted = extract(answers.get("q1_text", ""), answers.get("q4_text", ""))
-    for f in checks.numeric_flags(extracted):
+    # 2. Числа Q1 и Q4 разбираются из ячеек — кандидат вводил их полями,
+    # так что здесь только арифметика, без обращения к модели.
+    q1_numbers, _ = parse_q1(answers.get("q1_text", ""))
+    q4_numbers, _ = parse_q4(answers.get("q4_text", ""))
+    for f in checks.numeric_flags(q1_numbers, q4_numbers):
         if f not in flags:
             flags.append(f)
-    if checks.q1_needs_manual(extracted):
-        manual_reasons.append(
-            "по вопросу 1 меньше двух месяцев с полными цифрами (сделки, выручка, чек)"
-        )
 
     # 3. Скоринг.
     try:
@@ -201,33 +198,34 @@ def _process(row: int) -> str:
             row,
             flags=flags,
             conditions=conditions,
-            reasons=[SCORER_FAILED_RU, f"техническая причина: {e}"] + manual_reasons,
+            reasons=[SCORER_FAILED_RU, f"техническая причина: {e}"],
         )
         return STATUS_MANUAL
 
-    if not result.auto_filters.q1_personal_result_confirmed:
-        manual_reasons.append("по вопросу 1 не подтверждён личный результат")
+    # 4. Балл за Q1 — арифметика по числам из формы. Модель судит только о
+    # текстовой части: понятно ли, что кандидат считал закрытой сделкой.
+    all_scores = dict(result.scores)
+    all_scores["q1"] = checks.q1_score(
+        q1_numbers, result.auto_filters.q1_definition_ok
+    )
 
-    # 4. Вердикт.
+    # 5. Вердикт.
     v = decide(
-        scores=result.scores,
+        scores=all_scores,
         flags=flags,
         ai_style=result.ai_style,
         q3_senior_dm_confirmed=result.auto_filters.q3_senior_dm_confirmed,
     )
 
-    scores = [result.scores[k] for k in QKEYS]
-    is_manual = bool(manual_reasons)
-    reasons = v.reasons + zeroed + manual_reasons
+    scores = [all_scores[k] for k in QKEYS]
+    reasons = v.reasons + zeroed
     # Телеметрия не понижает вердикт, а даёт четвёртый вопрос на интервью.
     screening = result.screening_questions + screening_additions(flags)
 
-    # Ручная проверка показывает B, чтобы витрина не была пустой. Исключение —
-    # жёсткий C по автофильтру Q3: он объявлен безусловным, и подмена его на B
-    # означала бы, что кандидат без кейсов с ЛПР выглядит спорным, а не отказным.
-    hard_c = not result.auto_filters.q3_senior_dm_confirmed
-    verdict_out = v.verdict if hard_c or not is_manual else "B"
-
+    # Отсюда анкета всегда выходит с готовым вердиктом. Единственный путь в
+    # ручную проверку — сбой скорера, он обрабатывается выше и до этого
+    # места не доходит: раньше сюда приводило ещё и неудачное извлечение
+    # чисел из текста, но числа теперь приходят полями и не теряются.
     sheets.write_result(
         row,
         scores=scores,
@@ -237,20 +235,18 @@ def _process(row: int) -> str:
             evidence=result.evidence,
             screening=screening,
             flags=flags,
-            verdict=verdict_out,
-            status=STATUS_MANUAL if is_manual else STATUS_DONE,
+            verdict=v.verdict,
+            status=STATUS_DONE,
             conditions=conditions,
-            decision=ru.decision_ru(verdict_out, is_manual=is_manual),
+            decision=ru.decision_ru(v.verdict),
             ai_text=ru.ai_ru(result.ai_style, result.ai_markers),
             flags_text=ru.flags_ru(flags, reasons),
         ),
     )
-    status = STATUS_MANUAL if is_manual else STATUS_DONE
     log.info(
-        "строка %d: готово — вердикт %s, сумма %d, статус %s",
-        row, verdict_out, v.total, status,
+        "строка %d: готово — вердикт %s, сумма %d", row, v.verdict, v.total
     )
-    return status
+    return STATUS_DONE
 
 
 def _write_manual(row: int, *, flags: list[str], conditions: str, reasons: list[str]) -> None:

@@ -189,6 +189,140 @@ function joinErrors(errors) {
   return out.join('; ');
 }
 
+// ============================= Числа ======================================
+//
+// Зеркало app/numbers.py. Формат строки обязан совпадать до знака: одна и
+// та же анкета, пришедшая через FastAPI и через Apps Script, должна лечь в
+// колонку одинаково, иначе обработчик разберёт числа только у половины.
+
+var MONTHS_RU = [
+  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
+];
+
+var YM_RE = /^(\d{4})-(\d{2})$/;
+var MONTH_MAX_AGE = 24;   // насколько давние месяцы форма готова принять
+var TEXT_SEP = ' — ';     // между числами и текстовым ответом
+
+/** «2026-05» → «Май 2026». Год пишется всегда. */
+function monthLabel(ym) {
+  var m = YM_RE.exec(String(ym || ''));
+  if (!m) return '';
+  var month = parseInt(m[2], 10);
+  if (month < 1 || month > 12) return '';
+  return MONTHS_RU[month - 1] + ' ' + m[1];
+}
+
+/** Последние count полных месяцев, самый ранний первым. */
+function recentMonths(today, count) {
+  var out = [];
+  for (var i = 0; i < count; i++) {
+    var d = new Date(today.getFullYear(), today.getMonth() - (count - i), 1);
+    var month = d.getMonth() + 1;
+    out.push(d.getFullYear() + '-' + (month < 10 ? '0' : '') + month);
+  }
+  return out;
+}
+
+/**
+ * Месяц из формы или запасной, если пришёл мусор. Поле скрытое, кандидат
+ * его не видел — отклонять анкету из-за него нечестно.
+ */
+function normalizeMonth(value, today, fallback) {
+  var m = YM_RE.exec(String(value || '').trim());
+  if (!m) return fallback;
+  var year = parseInt(m[1], 10);
+  var month = parseInt(m[2], 10);
+  if (month < 1 || month > 12) return fallback;
+  var age = (today.getFullYear() - year) * 12 + (today.getMonth() + 1 - month);
+  if (age < 1 || age > MONTH_MAX_AGE) return fallback;
+  return m[1] + '-' + m[2];
+}
+
+/** Целое от 0 до limit либо null. Пробелы внутри числа снимаются. */
+function parseIntStrict(value, limit) {
+  var text = String(value === null || value === undefined ? '' : value).trim();
+  text = text.replace(/[\s\u00a0]/g, '');
+  if (!/^\d+$/.test(text)) return null;
+  var number = parseInt(text, 10);
+  if (number > limit) return null;
+  return number;
+}
+
+var EMPTY_RU = 'Укажите число';
+var NOT_INT_RU = 'Только целое число, без знаков и дробной части';
+var TOO_BIG_RU = 'Число слишком большое';
+
+/** Одно числовое поле. Ошибка встаёт под своим именем. */
+function numberCell(params, name, limit, errors) {
+  var value = String(params[name] || '').trim();
+  if (!value) {
+    errors[name] = EMPTY_RU;
+    return 0;
+  }
+  var number = parseIntStrict(value, limit);
+  if (number === null) {
+    errors[name] = /^[\d\s\u00a0]+$/.test(value) ? TOO_BIG_RU : NOT_INT_RU;
+    return 0;
+  }
+  return number;
+}
+
+/** Девять чисел вопроса 1 плюс месяцы, к которым они относятся. */
+function validateQ1Numbers(params, question, today, errors) {
+  var schema = question.months || { slots: [], columns: [] };
+  var expected = recentMonths(today, schema.slots.length);
+  var months = [];
+
+  for (var i = 0; i < schema.slots.length; i++) {
+    var prefix = 'q1_' + schema.slots[i] + '_';
+    var month = {
+      month: normalizeMonth(params[prefix + 'month'], today, expected[i])
+    };
+    for (var c = 0; c < schema.columns.length; c++) {
+      var col = schema.columns[c];
+      month[col.key] = numberCell(params, prefix + col.key, col.max, errors);
+    }
+    months.push(month);
+  }
+  return months;
+}
+
+/** Три метрики воронки вопроса 4. */
+function validateQ4Numbers(params, question, errors) {
+  var metrics = question.metrics || [];
+  var out = {};
+  for (var i = 0; i < metrics.length; i++) {
+    var name = metrics[i].field;
+    out[name.substring(3)] = numberCell(params, name, metrics[i].max, errors);
+  }
+  return out;
+}
+
+/** «Май 2026: 4 / 260000 / 65000; … — что считал закрытой сделкой». */
+function formatQ1(months, text) {
+  var parts = [];
+  for (var i = 0; i < months.length; i++) {
+    var m = months[i];
+    parts.push(
+      monthLabel(m.month) + ': ' + m.deals + ' / ' + m.revenue + ' / ' + m.check
+    );
+  }
+  var line = parts.join('; ');
+  text = String(text || '').trim();
+  return text ? line + TEXT_SEP + text : line;
+}
+
+/** «Касание→встреча: 12%; Встреча→оплата: 30%; Цикл сделки: 21 дн — …». */
+function formatQ4(numbers, text) {
+  var line =
+    'Касание→встреча: ' + numbers.conv_touch + '%; ' +
+    'Встреча→оплата: ' + numbers.conv_deal + '%; ' +
+    'Цикл сделки: ' + numbers.cycle_days + ' дн';
+  text = String(text || '').trim();
+  return text ? line + TEXT_SEP + text : line;
+}
+
 // =========================== Валидация ====================================
 
 var TELEGRAM_RE = /^@?[A-Za-z0-9_]{4,32}$/;
@@ -257,10 +391,19 @@ function validate(params) {
   }
 
   data.answers = {};
+  var today = new Date();
+  var q1Months = null;
+  var q4Numbers = null;
+
   for (var j = 0; j < QUESTIONS.open_questions.length; j++) {
     var oq = QUESTIONS.open_questions[j];
     var text = normalize(params[oq.field]);
     data.answers[oq.field] = text;
+
+    // Числа живут в своих полях, поэтому проверяются отдельно от текста —
+    // и длина текста считается без них, иначе минимум набирался бы цифрами.
+    if (oq.months) q1Months = validateQ1Numbers(params, oq, today, errors);
+    if (oq.metrics) q4Numbers = validateQ4Numbers(params, oq, errors);
 
     if (!text) {
       errors[oq.field] = 'Ответьте на этот вопрос';
@@ -274,6 +417,14 @@ function validate(params) {
     } else if (oq.max_length && text.length > oq.max_length) {
       errors[oq.field] = 'Не больше ' + oq.max_length + ' знаков';
     }
+  }
+
+  // Числа приписываются к тексту только теперь, когда длина уже проверена.
+  if (q1Months) {
+    data.answers.q1_text = formatQ1(q1Months, data.answers.q1_text);
+  }
+  if (q4Numbers) {
+    data.answers.q4_text = formatQ4(q4Numbers, data.answers.q4_text);
   }
 
   return { ok: !hasKeys(errors), errors: errors, data: data };

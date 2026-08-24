@@ -12,7 +12,8 @@ from app.config import (
     load_system_prompt,
 )
 from app.llm import client, normalize, parse_json, text_of
-from app.models import QKEYS, ScorerOutput
+from app.models import MODEL_QKEYS, ScorerOutput
+from app.numbers import parse_q1, parse_q4
 from app.retry import RetriesExhausted, call_with_backoff
 
 log = logging.getLogger(__name__)
@@ -23,12 +24,43 @@ class ScoringFailed(Exception):
 
 
 def build_prompt(answers: dict[str, str]) -> str:
+    """Собирает вопросы и ответы для модели.
+
+    Ячейки q1_text и q4_text хранят числа и текст вместе, поэтому здесь они
+    разбираются обратно. Модель получает их порознь: числа отдельным
+    блоком, чтобы не вылавливать их из фразы, а текст — сам по себе. По Q1
+    балл не запрашивается вовсе, его считает checks.q1_score.
+    """
     parts = []
     for i, q in enumerate(load_questions()["open_questions"], start=1):
-        parts.append(
-            f"=== Вопрос {i} ===\n{q['text']}\n\n"
-            f"--- Ответ кандидата ---\n{answers.get(q['field'], '').strip()}"
-        )
+        field = q["field"]
+        raw = answers.get(field, "").strip()
+        head = f"=== Вопрос {i} ===\n{q['text']}"
+
+        if field == "q1_text":
+            _, text = parse_q1(raw)
+            parts.append(
+                f"{head}\n\n"
+                "Числа по этому вопросу кандидат вводил в отдельные поля, они "
+                "проверены отдельно — балл за вопрос 1 не ставится.\n\n"
+                f"--- Что кандидат считал закрытой сделкой ---\n{text}"
+            )
+            continue
+
+        if field == "q4_text":
+            numbers, text = parse_q4(raw)
+            parts.append(
+                f"{head}\n\n"
+                "--- Числа кандидата ---\n"
+                f"конверсия касание → встреча: {numbers.conv_touch}%\n"
+                f"конверсия встреча → оплата: {numbers.conv_deal}%\n"
+                f"средний цикл сделки: {numbers.cycle_days} дн\n\n"
+                f"--- Ответ кандидата ---\n{text}"
+            )
+            continue
+
+        parts.append(f"{head}\n\n--- Ответ кандидата ---\n{raw}")
+
     return "\n\n".join(parts)
 
 
@@ -44,12 +76,12 @@ def enforce_evidence(
     """
     zeroed: list[str] = []
 
-    for i, key in enumerate(QKEYS, start=1):
+    for key in MODEL_QKEYS:
         if result.scores[key] == 0:
             continue
 
         quote = (result.evidence.get(key) or "").strip()
-        answer = answers.get(f"q{i}_text", "")
+        answer = answers.get(f"{key}_text", "")
         reason = None
 
         if not quote:
@@ -61,8 +93,8 @@ def enforce_evidence(
             reason = "цитаты нет в ответе кандидата"
 
         if reason:
-            log.info("q%d: балл %d обнулён — %s", i, result.scores[key], reason)
-            zeroed.append(f"q{i} обнулён ({reason})")
+            log.info("%s: балл %d обнулён — %s", key, result.scores[key], reason)
+            zeroed.append(f"{key} обнулён ({reason})")
             result.scores[key] = 0
 
     return result, zeroed
@@ -114,7 +146,7 @@ def score(answers: dict[str, str]) -> tuple[ScorerOutput, list[str]]:
         result, zeroed = enforce_evidence(result, answers)
         log.info(
             "скоринг готов: баллы %s, стиль ИИ %d%s",
-            [result.scores[k] for k in QKEYS],
+            [result.scores[k] for k in MODEL_QKEYS],
             result.ai_style,
             f", обнулено: {len(zeroed)}" if zeroed else "",
         )

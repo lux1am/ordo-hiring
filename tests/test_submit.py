@@ -9,8 +9,10 @@ from app import main
 from app.config import HONEYPOT_FIELD, STATUS_DUPLICATE, STATUS_NEW
 from app.models import OPEN_FIELDS, STOP_FIELDS
 
-ANSWER = ("Март: 4 сделки, 480 000 рублей, средний чек 120 000 рублей. "
-          "Закрытой считал сделку после полной оплаты по акту.")
+# Длиннее самого строгого минимума — 150 знаков у вопроса 3.
+ANSWER = ("Закрытой считал сделку после полной оплаты по акту, переговоры "
+          "вёл с собственниками и ИТ-директорами, средний чек около "
+          "120 000 рублей, цифры смотрел в CRM за последний квартал.")
 
 
 class FakeSheets:
@@ -61,6 +63,12 @@ def payload(**over):
     }
     data.update({f: "Да" for f in STOP_FIELDS})
     data.update({f: ANSWER for f in OPEN_FIELDS})
+    # Числовые поля Q1 и Q4 обязательные: без них анкету не принять.
+    for slot in ("m1", "m2", "m3"):
+        data[f"q1_{slot}_deals"] = "4"
+        data[f"q1_{slot}_revenue"] = "480000"
+        data[f"q1_{slot}_check"] = "120000"
+    data.update({"q4_conv_touch": "11", "q4_conv_deal": "30", "q4_cycle_days": "40"})
     data.update(over)
     return data
 

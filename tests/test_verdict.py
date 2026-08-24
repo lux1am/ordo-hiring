@@ -54,7 +54,7 @@ def test_ai_style_boundary():
 
 def test_other_flags_do_not_downgrade():
     """Понижают только MATH и высокий ai_style."""
-    for flag in ("PASTED", "SUSPICIOUS", "TAB_SWITCH", "OUTLIER", "NO_NUMBERS", "MOBILE"):
+    for flag in ("PASTED", "SUSPICIOUS", "TAB_SWITCH", "OUTLIER", "MOBILE"):
         assert decide(FULL, [flag], 0, True).verdict == "A", flag
 
 
@@ -76,7 +76,7 @@ def test_telemetry_adds_screening_question():
 
 
 def test_non_telemetry_flags_add_nothing():
-    for flag in ("MATH", "OUTLIER", "NO_NUMBERS", "MOBILE"):
+    for flag in ("MATH", "OUTLIER", "MOBILE"):
         assert screening_additions([flag]) == [], flag
     assert screening_additions([]) == []
 

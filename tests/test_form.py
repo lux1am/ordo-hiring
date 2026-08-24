@@ -3,8 +3,10 @@ import pytest
 from pydantic import ValidationError
 
 from app.models import OPEN_FIELDS, STOP_FIELDS, Submission, Telemetry
+from app.numbers import MonthNumbers, Q1Numbers, Q4Numbers
 
-GOOD_ANSWER = "Март: 4 сделки, 480 000 ₽, средний чек 120 000 ₽. " * 3
+# Длиннее самого строгого минимума — 150 знаков у вопроса 3.
+GOOD_ANSWER = "Закрытой считал сделку по дате акта и полной оплате. " * 4
 
 
 def base(**over):
@@ -21,10 +23,53 @@ def base(**over):
     return data
 
 
+def numbers() -> dict:
+    return dict(
+        q1_numbers=Q1Numbers(months=[
+            MonthNumbers(month="2026-03", deals=4, revenue=480000, check=120000),
+            MonthNumbers(month="2026-04", deals=4, revenue=480000, check=120000),
+            MonthNumbers(month="2026-05", deals=4, revenue=480000, check=120000),
+        ]),
+        q4_numbers=Q4Numbers(conv_touch=11, conv_deal=30, cycle_days=40),
+    )
+
+
 def test_valid():
     s = Submission(**base())
     assert s.telegram == "@ivanov"
     assert not s.has_stop_no()
+
+
+def test_numbers_are_prepended_to_text():
+    """Числа приписываются к ответу, а колонки таблицы остаются прежними."""
+    s = Submission(**base(**numbers()))
+    assert s.answers["q1_text"].startswith("Март 2026: 4 / 480000 / 120000; ")
+    assert s.answers["q1_text"].endswith(GOOD_ANSWER.strip())
+    assert s.answers["q4_text"].startswith(
+        "Касание→встреча: 11%; Встреча→оплата: 30%; Цикл сделки: 40 дн — "
+    )
+
+
+def test_length_is_measured_before_numbers_are_added():
+    """Минимум набирается текстом кандидата, а не цифрами из соседних полей.
+
+    Иначе короткая отписка проходила бы проверку за счёт приписанных к ней
+    чисел — строка с ними длиннее сорока знаков сама по себе.
+    """
+    short = {**{f: GOOD_ANSWER for f in OPEN_FIELDS}, "q1_text": "по акту"}
+    with pytest.raises(ValidationError, match="слишком короткий"):
+        Submission(**base(answers=short, **numbers()))
+
+
+def test_answer_without_numbers_stays_untouched():
+    """Без переданных чисел ответ ложится в ячейку как есть.
+
+    Нули вместо непереданных полей означали бы, что кандидату молча
+    записали результат, которого он не заявлял.
+    """
+    s = Submission(**base())
+    assert s.answers["q1_text"] == GOOD_ANSWER.strip()
+    assert s.answers["q4_text"] == GOOD_ANSWER.strip()
 
 
 @pytest.mark.parametrize(

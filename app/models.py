@@ -1,10 +1,11 @@
-"""Pydantic-схемы: телеметрия, форма, ответ скорера, ответ экстрактора."""
+"""Pydantic-схемы: телеметрия, форма, ответ скорера."""
 import re
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import load_questions
+from app.numbers import Q1Numbers, Q4Numbers, format_q1, format_q4
 
 YES = "Да"
 NO = "Нет"
@@ -62,7 +63,14 @@ URL_RE = re.compile(r"^https?://\S+\.\S+", re.IGNORECASE)
 
 
 class Submission(BaseModel):
-    """Провалидированная анкета. Собирается из тела POST /submit."""
+    """Провалидированная анкета. Собирается из тела POST /submit.
+
+    Числа Q1 и Q4 приходят готовыми объектами: их проверяет numbers.py ещё
+    в обработчике, потому что ошибку про конкретное числовое поле нужно
+    показать под этим полем, а pydantic назвал бы виноватой всю анкету.
+    Здесь они склеиваются с текстовым ответом в одну ячейку — колонки
+    таблицы прежние.
+    """
     fio: str
     telegram: str
     resume_url: str
@@ -70,6 +78,10 @@ class Submission(BaseModel):
     stops: dict[str, Literal["Да", "Нет"]]
     answers: dict[str, str]
     telemetry: Telemetry
+    q1_numbers: Q1Numbers | None = None
+    q4_numbers: Q4Numbers | None = None
+
+    model_config = {"arbitrary_types_allowed": True}
 
     @field_validator("fio")
     @classmethod
@@ -129,6 +141,18 @@ class Submission(BaseModel):
             if hi and len(text) > hi:
                 raise ValueError(f"{limits[f]['label']}: не больше {hi} знаков")
             self.answers[f] = text
+
+        # Длина проверена по тексту, который писал кандидат, и только теперь
+        # к нему спереди приписываются числа: иначе минимум в 40 знаков
+        # набирался бы одними цифрами из соседних полей.
+        #
+        # Числа необязательны намеренно: без них анкета собирается из одного
+        # текста, и подставить вместо пропущенных полей нули — молча
+        # записать кандидату результат, которого он не заявлял.
+        if self.q1_numbers is not None:
+            self.answers["q1_text"] = format_q1(self.q1_numbers, self.answers["q1_text"])
+        if self.q4_numbers is not None:
+            self.answers["q4_text"] = format_q4(self.q4_numbers, self.answers["q4_text"])
         return self
 
     def has_stop_no(self) -> bool:
@@ -142,13 +166,21 @@ class Submission(BaseModel):
 # =========================== ОТВЕТ СКОРЕРА ================================
 
 Score = Annotated[int, Field(ge=0, le=3)]
+
+# Порядок баллов в таблице — колонки AI..AM, все пять вопросов.
 QKEYS = ["q1", "q2", "q3", "q4", "q5"]
+# Что из этого оценивает модель. Балл за Q1 считает checks.q1_score по
+# числам из формы: там нечего трактовать, а детерминированный балл ещё и
+# воспроизводится при разборе спорной анкеты.
+MODEL_QKEYS = ["q2", "q3", "q4", "q5"]
 
 
 class AutoFilters(BaseModel):
     """Факты, которые модель обязана констатировать явно — на них висят автофильтры."""
     q3_senior_dm_confirmed: bool = False
-    q1_personal_result_confirmed: bool = False
+    # Понятно ли из текста Q1, что кандидат считал закрытой сделкой. Без
+    # этого балл за Q1 упирается в двойку: цифры без определения нечитаемы.
+    q1_definition_ok: bool = False
 
 
 class ScorerOutput(BaseModel):
@@ -161,11 +193,11 @@ class ScorerOutput(BaseModel):
 
     @field_validator("scores", "evidence")
     @classmethod
-    def _all_five(cls, v: dict):
-        missing = [k for k in QKEYS if k not in v]
+    def _all_scored(cls, v: dict):
+        missing = [k for k in MODEL_QKEYS if k not in v]
         if missing:
             raise ValueError(f"нет ключей: {', '.join(missing)}")
-        return {k: v[k] for k in QKEYS}
+        return {k: v[k] for k in MODEL_QKEYS}
 
     @field_validator("screening_questions")
     @classmethod
@@ -174,32 +206,3 @@ class ScorerOutput(BaseModel):
         if len(v) != 3:
             raise ValueError(f"нужно ровно 3 вопроса, получено {len(v)}")
         return v
-
-
-# ========================= ОТВЕТ ЭКСТРАКТОРА ==============================
-
-class MonthNumbers(BaseModel):
-    month: str | None = None
-    deals: float | None = None
-    revenue: float | None = None
-    avg_check: float | None = None
-
-    def is_complete(self) -> bool:
-        """Месяц засчитан подтверждённым только при всех трёх числах."""
-        return (
-            self.deals is not None and self.deals > 0
-            and self.revenue is not None and self.revenue > 0
-            and self.avg_check is not None and self.avg_check > 0
-        )
-
-
-class ExtractorOutput(BaseModel):
-    months: list[MonthNumbers] = Field(default_factory=list)
-    conv_touch_meeting: float | None = None
-    conv_meeting_deal: float | None = None
-
-    def confirmed_months(self) -> list[MonthNumbers]:
-        return [m for m in self.months if m.is_complete()]
-
-    def has_any_numbers(self) -> bool:
-        return bool(self.confirmed_months()) or self.conv_touch_meeting is not None

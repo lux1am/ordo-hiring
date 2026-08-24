@@ -1,38 +1,73 @@
 {
   "name": "Хорошие цифры, но нет кейсов с собственниками и CTO — автофильтр даёт C",
   "stops": {
-    "stop_1_oklad": "Да", "stop_2_komissiya": "Да", "stop_3_kasaniya": "Да",
-    "stop_4_vstrechi": "Да", "stop_5_vedenie": "Да", "stop_6_crm": "Да"
+    "stop_1_oklad": "Да",
+    "stop_2_komissiya": "Да",
+    "stop_3_kasaniya": "Да",
+    "stop_4_vstrechi": "Да",
+    "stop_5_vedenie": "Да",
+    "stop_6_crm": "Да"
   },
   "answers": {
-    "q1_text": "Март: 5 сделок, 500 000 ₽, чек 100 000 ₽. Апрель: 4 сделки, 400 000 ₽, чек 100 000 ₽. Май: 5 сделок, 520 000 ₽, чек 104 000 ₽. Закрытая сделка — оплаченный счёт.",
+    "q1_text": "Март 2026: 5 / 500000 / 100000; Апрель 2026: 4 / 400000 / 100000; Май 2026: 5 / 520000 / 104000 — Закрытая сделка — оплаченный счёт, до подписания акта сделку не считал.",
     "q2_text": "130 холодных касаний в неделю, 15 встреч, конверсия 11%, каналы телефон и почта, сделки закрывал сам до оплаты.",
     "q3_text": "Переговоры вёл с менеджерами по закупкам и начальниками отделов. Кейсы: 100 000 ₽ с начальником отдела снабжения, 120 000 ₽ с руководителем направления. Закрывал лично.",
-    "q4_text": "Касание-встреча 11%, встреча-КП 60%, КП-оплата 34%. Цикл 35 дней, чек 100 000 ₽. Теряли, когда решение уходило выше к директору.",
+    "q4_text": "Касание→встреча: 11%; Встреча→оплата: 34%; Цикл сделки: 35 дн — Считал за квартал в таблице, теряли, когда решение уходило выше к директору.",
     "q5_text": "Торговая компания, 120 000 ₽, ЛПР руководитель направления, цикл 5 недель, возражение по срокам, согласовал поэтапный запуск, проект завершён."
   },
   "telemetry": {
-    "is_mobile": false, "tab_switches": 2, "total_time_sec": 1500,
+    "is_mobile": false,
+    "tab_switches": 2,
+    "total_time_sec": 1500,
     "fields": {
-      "q1_text": {"length": 170, "pasted_chars": 0, "speed_cpm": 168, "backspaces": 22},
-      "q2_text": {"length": 120, "pasted_chars": 0, "speed_cpm": 160, "backspaces": 13},
-      "q3_text": {"length": 175, "pasted_chars": 0, "speed_cpm": 155, "backspaces": 19},
-      "q4_text": {"length": 135, "pasted_chars": 0, "speed_cpm": 150, "backspaces": 12},
-      "q5_text": {"length": 140, "pasted_chars": 0, "speed_cpm": 148, "backspaces": 14}
+      "q1_text": {
+        "length": 170,
+        "pasted_chars": 0,
+        "speed_cpm": 168,
+        "backspaces": 22
+      },
+      "q2_text": {
+        "length": 120,
+        "pasted_chars": 0,
+        "speed_cpm": 160,
+        "backspaces": 13
+      },
+      "q3_text": {
+        "length": 175,
+        "pasted_chars": 0,
+        "speed_cpm": 155,
+        "backspaces": 19
+      },
+      "q4_text": {
+        "length": 135,
+        "pasted_chars": 0,
+        "speed_cpm": 150,
+        "backspaces": 12
+      },
+      "q5_text": {
+        "length": 140,
+        "pasted_chars": 0,
+        "speed_cpm": 148,
+        "backspaces": 14
+      }
     }
   },
-  "extracted": {
-    "months": [
-      {"month": "март", "deals": 5, "revenue": 500000, "avg_check": 100000},
-      {"month": "апрель", "deals": 4, "revenue": 400000, "avg_check": 100000},
-      {"month": "май", "deals": 5, "revenue": 520000, "avg_check": 104000}
-    ],
-    "conv_touch_meeting": 11, "conv_meeting_deal": 34
+  "auto_filters": {
+    "q3_senior_dm_confirmed": false,
+    "q1_definition_ok": true
   },
-  "auto_filters": {"q3_senior_dm_confirmed": false, "q1_personal_result_confirmed": true},
   "ai_style": 30,
   "expected": {
-    "scores": {"q1": 3, "q2": 3, "q3": 2, "q4": 2, "q5": 2},
-    "total": 12, "verdict": "C", "status": "done", "flags": []
+    "scores": {
+      "q1": 3,
+      "q2": 3,
+      "q3": 2,
+      "q4": 2,
+      "q5": 2
+    },
+    "total": 12,
+    "verdict": "C",
+    "status": "done",
+    "flags": []
   }
 }

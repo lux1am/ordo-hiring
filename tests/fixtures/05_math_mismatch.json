@@ -1,38 +1,75 @@
 {
   "name": "Цифры не сходятся: сделки × чек не равны выручке",
   "stops": {
-    "stop_1_oklad": "Да", "stop_2_komissiya": "Да", "stop_3_kasaniya": "Да",
-    "stop_4_vstrechi": "Да", "stop_5_vedenie": "Да", "stop_6_crm": "Да"
+    "stop_1_oklad": "Да",
+    "stop_2_komissiya": "Да",
+    "stop_3_kasaniya": "Да",
+    "stop_4_vstrechi": "Да",
+    "stop_5_vedenie": "Да",
+    "stop_6_crm": "Да"
   },
   "answers": {
-    "q1_text": "Март: 3 сделки, выручка 2 400 000 ₽, средний чек 150 000 ₽. Апрель: 4 сделки, выручка 600 000 ₽, средний чек 150 000 ₽. Май: 3 сделки, выручка 450 000 ₽, средний чек 150 000 ₽. Закрытая сделка — подписанный договор.",
+    "q1_text": "Март 2026: 3 / 2400000 / 150000; Апрель 2026: 4 / 600000 / 150000; Май 2026: 3 / 450000 / 150000 — Закрытой сделкой считал подписанный договор с внесённой предоплатой.",
     "q2_text": "Делал около 130 касаний в неделю, назначал 14 встреч, работал по телефону и почте, конверсия касание-встреча 11%, доводил сделки до оплаты сам.",
     "q3_text": "Вёл переговоры с ИТ-директорами и собственниками, закрывал лично. Кейсы: 150 000 ₽ с ИТ-директором завода, 120 000 ₽ с собственником торговой сети.",
-    "q4_text": "Конверсия касание-встреча 11%, встреча-КП 65%, КП-оплата 30%. Цикл 45 дней, чек 150 000 ₽. Теряли, когда не выходили на экономического покупателя.",
+    "q4_text": "Касание→встреча: 11%; Встреча→оплата: 30%; Цикл сделки: 45 дн — Считал за полугодие в CRM, теряли, когда не выходили на экономического покупателя.",
     "q5_text": "Завод металлоконструкций, 150 000 ₽, ЛПР ИТ-директор, цикл 2,5 месяца. Возражение о сроках внедрения, показал план по этапам, проект завершён."
   },
   "telemetry": {
-    "is_mobile": false, "tab_switches": 2, "total_time_sec": 1400,
+    "is_mobile": false,
+    "tab_switches": 2,
+    "total_time_sec": 1400,
     "fields": {
-      "q1_text": {"length": 215, "pasted_chars": 0, "speed_cpm": 175, "backspaces": 25},
-      "q2_text": {"length": 150, "pasted_chars": 0, "speed_cpm": 165, "backspaces": 18},
-      "q3_text": {"length": 155, "pasted_chars": 0, "speed_cpm": 160, "backspaces": 16},
-      "q4_text": {"length": 145, "pasted_chars": 0, "speed_cpm": 158, "backspaces": 14},
-      "q5_text": {"length": 145, "pasted_chars": 0, "speed_cpm": 152, "backspaces": 17}
+      "q1_text": {
+        "length": 215,
+        "pasted_chars": 0,
+        "speed_cpm": 175,
+        "backspaces": 25
+      },
+      "q2_text": {
+        "length": 150,
+        "pasted_chars": 0,
+        "speed_cpm": 165,
+        "backspaces": 18
+      },
+      "q3_text": {
+        "length": 155,
+        "pasted_chars": 0,
+        "speed_cpm": 160,
+        "backspaces": 16
+      },
+      "q4_text": {
+        "length": 145,
+        "pasted_chars": 0,
+        "speed_cpm": 158,
+        "backspaces": 14
+      },
+      "q5_text": {
+        "length": 145,
+        "pasted_chars": 0,
+        "speed_cpm": 152,
+        "backspaces": 17
+      }
     }
   },
-  "extracted": {
-    "months": [
-      {"month": "март", "deals": 3, "revenue": 2400000, "avg_check": 150000},
-      {"month": "апрель", "deals": 4, "revenue": 600000, "avg_check": 150000},
-      {"month": "май", "deals": 3, "revenue": 450000, "avg_check": 150000}
-    ],
-    "conv_touch_meeting": 11, "conv_meeting_deal": 30
+  "auto_filters": {
+    "q3_senior_dm_confirmed": true,
+    "q1_definition_ok": true
   },
-  "auto_filters": {"q3_senior_dm_confirmed": true, "q1_personal_result_confirmed": true},
   "ai_style": 28,
   "expected": {
-    "scores": {"q1": 2, "q2": 3, "q3": 3, "q4": 3, "q5": 2},
-    "total": 13, "verdict": "B", "status": "done", "flags": ["MATH"]
+    "scores": {
+      "q1": 3,
+      "q2": 3,
+      "q3": 3,
+      "q4": 3,
+      "q5": 2
+    },
+    "total": 14,
+    "verdict": "B",
+    "status": "done",
+    "flags": [
+      "MATH"
+    ]
   }
 }

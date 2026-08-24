@@ -11,13 +11,16 @@ from fastapi.testclient import TestClient
 
 from HEADERS import COL_RESULT_START, HEADERS
 from app import main, pipeline
-from app.checks import FLAG_MOBILE, FLAG_PASTED
+from app.checks import FLAG_MATH, FLAG_MOBILE, FLAG_PASTED
 from app.config import STATUS_DONE, STATUS_NEW
-from app.models import OPEN_FIELDS, STOP_FIELDS, ExtractorOutput, ScorerOutput
+from app.models import MODEL_QKEYS, OPEN_FIELDS, STOP_FIELDS, ScorerOutput
 
-ANSWER = ("Март: 4 сделки, 480 000 рублей, средний чек 120 000 рублей. "
-          "Апрель: 4 сделки, 480 000 рублей, чек 120 000 рублей. "
-          "Закрытой считал сделку после полной оплаты по акту.")
+# Длиннее самого строгого минимума (150 знаков у вопроса 3), чтобы один и
+# тот же текст годился всем пяти полям.
+ANSWER = ("Закрытой считал сделку после полной оплаты по акту, а не по "
+          "подписанному договору. Переговоры вёл с собственниками и "
+          "ИТ-директорами, средний чек около 120 000 рублей, цифры смотрел "
+          "в CRM за последний квартал.")
 
 
 class SharedSheet:
@@ -77,19 +80,10 @@ def sheet(monkeypatch):
     monkeypatch.setattr(main.recovery, "start_scanner", lambda: None)
     monkeypatch.setattr(main.recovery, "recover", lambda **kw: [])
 
-    # По умолчанию экстрактор отрабатывает штатно: два полных месяца, чтобы
-    # анкета доходила до статуса done, а не уходила в manual по NO_NUMBERS.
-    monkeypatch.setattr(pipeline, "extract", lambda *a, **k: ExtractorOutput.model_validate({
-        "months": [
-            {"month": "март", "deals": 4, "revenue": 480000, "avg_check": 120000},
-            {"month": "апрель", "deals": 4, "revenue": 480000, "avg_check": 120000},
-        ],
-        "conv_touch_meeting": 11, "conv_meeting_deal": 30,
-    }))
     monkeypatch.setattr(pipeline, "score", lambda answers: (ScorerOutput(
-        scores={k: 2 for k in ["q1", "q2", "q3", "q4", "q5"]},
-        evidence={k: "цитата" for k in ["q1", "q2", "q3", "q4", "q5"]},
-        auto_filters={"q3_senior_dm_confirmed": True, "q1_personal_result_confirmed": True},
+        scores={k: 2 for k in MODEL_QKEYS},
+        evidence={k: "цитата" for k in MODEL_QKEYS},
+        auto_filters={"q3_senior_dm_confirmed": True, "q1_definition_ok": True},
         ai_style=25, ai_markers=[], screening_questions=["а", "б", "в"],
     ), []))
 
@@ -98,7 +92,20 @@ def sheet(monkeypatch):
     return shared
 
 
-def payload(is_mobile: bool, pasted: int = 0):
+def numbers(revenue: int = 480000) -> dict:
+    """Числовые поля формы: три ровных месяца и три метрики воронки."""
+    data = {}
+    for slot in ("m1", "m2", "m3"):
+        data[f"q1_{slot}_deals"] = "4"
+        data[f"q1_{slot}_revenue"] = str(revenue)
+        data[f"q1_{slot}_check"] = "120000"
+    data.update({
+        "q4_conv_touch": "11", "q4_conv_deal": "30", "q4_cycle_days": "40",
+    })
+    return data
+
+
+def payload(is_mobile: bool, pasted: int = 0, revenue: int = 480000):
     data = {
         "fio": "Иванов Иван Иванович",
         "telegram": "@ivanov",
@@ -112,6 +119,7 @@ def payload(is_mobile: bool, pasted: int = 0):
     }
     data.update({f: "Да" for f in STOP_FIELDS})
     data.update({f: ANSWER for f in OPEN_FIELDS})
+    data.update(numbers(revenue))
     return data
 
 
@@ -131,23 +139,49 @@ def test_telemetry_flags_survive_processor_write(sheet):
     assert sheet.get("status") == STATUS_DONE
     assert sheet.get("total_score") == "=ФОРМУЛА", "формула затёрта"
     assert "заполнено с телефона" in sheet.get("flags_ru")
-    assert sheet.get("score_q1") == 2, "баллы записаны"
+    assert sheet.get("score_q1") == 3, "три ровных месяца — балл считает код"
 
     # Идемпотентность на реальном пути: повторный запуск ничего не меняет.
     pipeline.process_row(2)
     assert sheet.result_writes == 1
 
 
-def test_processor_merges_own_flags_with_telemetry(sheet, monkeypatch):
+def test_processor_merges_own_flags_with_telemetry(sheet):
     """Свои флаги обработчик добавляет к вычитанным, а не заменяет ими."""
-    # Экстрактор молчит — обработчик добавит свой NO_NUMBERS к флагам сабмита.
-    monkeypatch.setattr(pipeline, "extract", lambda *a, **k: None)
+    # Выручка втрое выше, чем сделки на чек, — обработчик добавит MATH к
+    # флагам, записанным при сабмите.
     with TestClient(main.app) as c:
-        c.post("/submit", data=payload(is_mobile=True, pasted=180))
+        c.post("/submit", data=payload(is_mobile=True, pasted=180, revenue=1500000))
 
     final = set(sheet.read_flags(2))
     assert {FLAG_MOBILE, FLAG_PASTED} <= final, "флаги сабмита потеряны"
-    assert "NO_NUMBERS" in final, "флаг обработчика не добавлен"
+    assert FLAG_MATH in final, "флаг обработчика не добавлен"
+
+
+def test_numbers_reach_the_sheet_as_one_cell(sheet):
+    """Девять чисел Q1 ложатся в свою колонку строкой, читаемой человеком."""
+    with TestClient(main.app) as c:
+        c.post("/submit", data=payload(is_mobile=False))
+
+    cell = sheet.get("q1_text")
+    assert cell.count("/") == 6, "три месяца по три числа"
+    assert "4 / 480000 / 120000" in cell
+    assert cell.endswith(ANSWER), "текст кандидата идёт следом за числами"
+    assert sheet.get("q4_text").startswith("Касание→встреча: 11%; ")
+
+
+def test_missing_number_is_reported_on_its_field(sheet):
+    """Ошибка числового поля возвращается с именем этого поля."""
+    data = payload(is_mobile=False)
+    data["q1_m2_deals"] = ""
+    data["q4_cycle_days"] = "полтора"
+    with TestClient(main.app) as c:
+        r = c.post("/submit", data=data, headers={"Accept": "application/json"})
+
+    assert r.status_code == 400
+    errors = r.json()["errors"]
+    assert "q1_m2_deals" in errors and "q4_cycle_days" in errors
+    assert sheet.get("status") == "", "анкета с битыми числами не записывается"
 
 
 def test_desktop_submit_has_no_mobile_flag(sheet):

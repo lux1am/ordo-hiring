@@ -79,6 +79,41 @@
       <div class="field">
         <span class="q-num"><?= oq.label ?></span>
         <div class="q-text"><?= oq.text ?></div>
+        <? if (oq.months) { ?>
+        <div class="numbers">
+          <? for (var s = 0; s < oq.months.slots.length; s++) {
+               var slot = oq.months.slots[s]; ?>
+          <div class="month-row">
+            <div class="month-name" data-month-label="<?= slot ?>"></div>
+            <input type="hidden" name="q1_<?= slot ?>_month" data-month-value="<?= slot ?>">
+            <? for (var c = 0; c < oq.months.columns.length; c++) {
+                 var col = oq.months.columns[c];
+                 var name = 'q1_' + slot + '_' + col.key; ?>
+            <div class="num-cell">
+              <label for="<?= name ?>"><?= col.label ?></label>
+              <input type="number" inputmode="numeric" step="1" min="0" max="<?= col.max ?>"
+                id="<?= name ?>" name="<?= name ?>" required>
+              <div class="field-error" data-error-for="<?= name ?>"></div>
+            </div>
+            <? } ?>
+          </div>
+          <? } ?>
+        </div>
+        <? } ?>
+        <? if (oq.metrics) { ?>
+        <div class="numbers metrics">
+          <? for (var k = 0; k < oq.metrics.length; k++) {
+               var metric = oq.metrics[k]; ?>
+          <div class="num-cell">
+            <label for="<?= metric.field ?>"><?= metric.label ?></label>
+            <input type="number" inputmode="numeric" step="1" min="0" max="<?= metric.max ?>"
+              id="<?= metric.field ?>" name="<?= metric.field ?>" required>
+            <div class="field-error" data-error-for="<?= metric.field ?>"></div>
+          </div>
+          <? } ?>
+        </div>
+        <? } ?>
+        <? if (oq.text_label) { ?><div class="hint"><?= oq.text_label ?></div><? } ?>
         <textarea id="<?= oq.field ?>" name="<?= oq.field ?>" data-telemetry="<?= oq.field ?>"
           data-min="<?= oq.min_length || 0 ?>"
           <? if (oq.max_length) { ?>maxlength="<?= oq.max_length ?>"<? } ?>

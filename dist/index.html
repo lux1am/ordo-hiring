@@ -60,7 +60,7 @@
   .hint { color: var(--muted); font-size: 14px; font-weight: 400; margin-bottom: 8px; }
   .field { margin-bottom: 20px; }
   .field:last-child { margin-bottom: 0; }
-  input[type=text], input[type=url], textarea {
+  input[type=text], input[type=url], input[type=number], textarea {
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--line);
@@ -76,6 +76,28 @@
     border-color: var(--accent);
   }
   textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
+  /* Числовые блоки Q1 и Q4. Числа кандидат вводит полями, а не текстом:
+     так их не нужно вылавливать из фразы, и они сразу пригодны для сверки. */
+  .numbers { margin: 0 0 16px; }
+  .month-row {
+    display: grid;
+    grid-template-columns: 132px repeat(3, 1fr);
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 10px;
+  }
+  .month-name { font-weight: 550; padding-bottom: 11px; }
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .num-cell label {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-bottom: 5px;
+  }
+  /* Подписи колонок повторяются в каждой строке месяца — на широком экране
+     это шум, поэтому видна только первая. На узком сетка перестраивается,
+     и подписи возвращаются: там строки идут одна под другой. */
+  .month-row + .month-row .num-cell label { visibility: hidden; }
   .counter { font-size: 13px; color: var(--muted); margin-top: 6px; }
   .counter.ok { color: #15803d; }
   .counter.limit { color: #c2410c; }
@@ -150,6 +172,10 @@
     section { padding: 16px; border-radius: 6px; }
     h1 { font-size: 21px; }
     .radio-row label { flex: 1 1 100%; }
+    .month-row { grid-template-columns: 1fr; gap: 8px; margin-bottom: 18px; }
+    .month-name { padding-bottom: 0; }
+    .month-row + .month-row .num-cell label { visibility: visible; }
+    .metrics { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -363,9 +389,106 @@
       
       <div class="field">
         <span class="q-num">Вопрос 1</span>
-        <div class="q-text">Сколько сделок вы лично закрывали за каждый из последних 3 полных месяцев? Укажите по каждому месяцу: количество завершённых проектов, сумму полученной выручки, средний чек, что вы считали закрытой сделкой.</div>
+        <div class="q-text">Сколько сделок вы лично закрывали за каждый из последних трёх полных месяцев? Укажите по каждому месяцу количество завершённых проектов, полученную выручку и средний чек.</div>
+        
+        <div class="numbers">
+          
+          <div class="month-row">
+            <div class="month-name" data-month-label="m1"></div>
+            <input type="hidden" name="q1_m1_month" data-month-value="m1">
+            
+            <div class="num-cell">
+              <label for="q1_m1_deals">Сделок</label>
+              <input type="number" inputmode="numeric" step="1" min="0" max="1000"
+                id="q1_m1_deals" name="q1_m1_deals"
+                value="" required>
+              <div class="field-error" data-error-for="q1_m1_deals"></div>
+            </div>
+            
+            <div class="num-cell">
+              <label for="q1_m1_revenue">Выручка, ₽</label>
+              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
+                id="q1_m1_revenue" name="q1_m1_revenue"
+                value="" required>
+              <div class="field-error" data-error-for="q1_m1_revenue"></div>
+            </div>
+            
+            <div class="num-cell">
+              <label for="q1_m1_check">Средний чек, ₽</label>
+              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
+                id="q1_m1_check" name="q1_m1_check"
+                value="" required>
+              <div class="field-error" data-error-for="q1_m1_check"></div>
+            </div>
+            
+          </div>
+          
+          <div class="month-row">
+            <div class="month-name" data-month-label="m2"></div>
+            <input type="hidden" name="q1_m2_month" data-month-value="m2">
+            
+            <div class="num-cell">
+              <label for="q1_m2_deals">Сделок</label>
+              <input type="number" inputmode="numeric" step="1" min="0" max="1000"
+                id="q1_m2_deals" name="q1_m2_deals"
+                value="" required>
+              <div class="field-error" data-error-for="q1_m2_deals"></div>
+            </div>
+            
+            <div class="num-cell">
+              <label for="q1_m2_revenue">Выручка, ₽</label>
+              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
+                id="q1_m2_revenue" name="q1_m2_revenue"
+                value="" required>
+              <div class="field-error" data-error-for="q1_m2_revenue"></div>
+            </div>
+            
+            <div class="num-cell">
+              <label for="q1_m2_check">Средний чек, ₽</label>
+              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
+                id="q1_m2_check" name="q1_m2_check"
+                value="" required>
+              <div class="field-error" data-error-for="q1_m2_check"></div>
+            </div>
+            
+          </div>
+          
+          <div class="month-row">
+            <div class="month-name" data-month-label="m3"></div>
+            <input type="hidden" name="q1_m3_month" data-month-value="m3">
+            
+            <div class="num-cell">
+              <label for="q1_m3_deals">Сделок</label>
+              <input type="number" inputmode="numeric" step="1" min="0" max="1000"
+                id="q1_m3_deals" name="q1_m3_deals"
+                value="" required>
+              <div class="field-error" data-error-for="q1_m3_deals"></div>
+            </div>
+            
+            <div class="num-cell">
+              <label for="q1_m3_revenue">Выручка, ₽</label>
+              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
+                id="q1_m3_revenue" name="q1_m3_revenue"
+                value="" required>
+              <div class="field-error" data-error-for="q1_m3_revenue"></div>
+            </div>
+            
+            <div class="num-cell">
+              <label for="q1_m3_check">Средний чек, ₽</label>
+              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
+                id="q1_m3_check" name="q1_m3_check"
+                value="" required>
+              <div class="field-error" data-error-for="q1_m3_check"></div>
+            </div>
+            
+          </div>
+          
+        </div>
+        
+        
+        <div class="hint">Что вы считали закрытой сделкой? По какому событию фиксировали?</div>
         <textarea id="q1_text" name="q1_text" data-telemetry="q1_text"
-          data-min="80"
+          data-min="40"
           
           required></textarea>
         <div class="counter" data-counter-for="q1_text"></div>
@@ -375,6 +498,9 @@
       <div class="field">
         <span class="q-num">Вопрос 2</span>
         <div class="q-text">Какой у вас был опыт outbound-продаж? Укажите: сколько холодных касаний делали в день и неделю, какие каналы использовали, сколько встреч назначали, какая была конверсия «касание → встреча», самостоятельно ли доводили сделки до оплаты.</div>
+        
+        
+        
         <textarea id="q2_text" name="q2_text" data-telemetry="q2_text"
           data-min="80"
           
@@ -385,9 +511,12 @@
       
       <div class="field">
         <span class="q-num">Вопрос 3</span>
-        <div class="q-text">С кем вы проводили переговоры и какие сделки закрывали лично? Укажите: должности участников переговоров, кто был пользователем, ЛПР и экономическим покупателем, средний чек, вашу роль от первого контакта до завершения проекта, 2–3 конкретных кейса с суммами.</div>
+        <div class="q-text">С кем вы проводили переговоры? Укажите должности участников, кто был пользователем, кто принимал решение, кто платил, и ваш средний чек. Конкретный кейс описывать не нужно — для него отдельный вопрос ниже.</div>
+        
+        
+        
         <textarea id="q3_text" name="q3_text" data-telemetry="q3_text"
-          data-min="80"
+          data-min="150"
           
           required></textarea>
         <div class="counter" data-counter-for="q3_text"></div>
@@ -396,9 +525,40 @@
       
       <div class="field">
         <span class="q-num">Вопрос 4</span>
-        <div class="q-text">Какие показатели своей воронки вы отслеживали? Укажите любые релевантные метрики: встреча → бриф, бриф → КП, КП → оплата, средний цикл сделки, средний чек, количество повторных касаний, доля новых клиентов и подписок. Для каждой метрики укажите период и этапы расчёта.</div>
+        <div class="q-text">Какие показатели своей воронки вы отслеживали?</div>
+        
+        
+        <div class="numbers metrics">
+          
+          <div class="num-cell">
+            <label for="q4_conv_touch">Конверсия касание → встреча, %</label>
+            <input type="number" inputmode="numeric" step="1" min="0" max="100"
+              id="q4_conv_touch" name="q4_conv_touch"
+              value="" required>
+            <div class="field-error" data-error-for="q4_conv_touch"></div>
+          </div>
+          
+          <div class="num-cell">
+            <label for="q4_conv_deal">Конверсия встреча → оплата, %</label>
+            <input type="number" inputmode="numeric" step="1" min="0" max="100"
+              id="q4_conv_deal" name="q4_conv_deal"
+              value="" required>
+            <div class="field-error" data-error-for="q4_conv_deal"></div>
+          </div>
+          
+          <div class="num-cell">
+            <label for="q4_cycle_days">Средний цикл сделки, дней</label>
+            <input type="number" inputmode="numeric" step="1" min="0" max="3650"
+              id="q4_cycle_days" name="q4_cycle_days"
+              value="" required>
+            <div class="field-error" data-error-for="q4_cycle_days"></div>
+          </div>
+          
+        </div>
+        
+        <div class="hint">За какой период эти цифры и как вы их считали?</div>
         <textarea id="q4_text" name="q4_text" data-telemetry="q4_text"
-          data-min="80"
+          data-min="40"
           
           required></textarea>
         <div class="counter" data-counter-for="q4_text"></div>
@@ -408,6 +568,9 @@
       <div class="field">
         <span class="q-num">Вопрос 5</span>
         <div class="q-text">Опишите один сложный B2B-кейс: клиент, сумма, ЛПР, цикл, ключевое возражение, ваши действия и результат. До 700 знаков.</div>
+        
+        
+        
         <textarea id="q5_text" name="q5_text" data-telemetry="q5_text"
           data-min="80"
           maxlength="700"
@@ -548,6 +711,30 @@ window.submitPayload = function (data) {
     return { text: shortfallText(min - length), cls: "counter" };
   }
 
+  // Месяцы вопроса 1 считает браузер, а не сборка: статическая страница
+  // собирается один раз при деплое, и зашитые в неё названия через квартал
+  // спрашивали бы уже не про последние три месяца. Сервер пересчитывает их
+  // сам и присланному значению не верит — см. normalize_month.
+  var MONTHS_RU = [
+    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
+  ];
+
+  // Последние `count` полных месяцев, самый ранний первым. Полный — значит
+  // завершившийся: про текущий месяц кандидату ещё нечего сказать.
+  function monthSlots(now, count) {
+    var out = [];
+    for (var i = 0; i < count; i++) {
+      var d = new Date(now.getFullYear(), now.getMonth() - (count - i), 1);
+      var month = d.getMonth() + 1;
+      out.push({
+        label: MONTHS_RU[d.getMonth()] + " " + d.getFullYear(),
+        value: d.getFullYear() + "-" + (month < 10 ? "0" : "") + month
+      });
+    }
+    return out;
+  }
+
   var REQUIRED_TEXT = "Заполните это поле";
   var CONSENT_REQUIRED_TEXT = "Отметьте согласие — без него анкету не отправить";
   var FORMAT_TEXT = "Проверьте формат";
@@ -652,6 +839,21 @@ window.submitPayload = function (data) {
     }
   });
 
+  // ------------------------ Месяцы вопроса 1 -----------------------------
+
+  (function fillMonths() {
+    var labels = document.querySelectorAll("[data-month-label]");
+    if (!labels.length) return;
+    var slots = monthSlots(new Date(), labels.length);
+    Array.prototype.forEach.call(labels, function (el, i) {
+      el.textContent = slots[i].label;
+      var hidden = document.querySelector(
+        '[data-month-value="' + el.getAttribute("data-month-label") + '"]'
+      );
+      if (hidden) hidden.value = slots[i].value;
+    });
+  })();
+
   // ------------------------- Отправка ------------------------------------
 
   var form = document.getElementById("form");
@@ -706,6 +908,12 @@ window.submitPayload = function (data) {
     }
     if (v.tooShort) return "Слишком коротко: нужно хотя бы " + chars(el.minLength);
     if (v.tooLong) return "Слишком длинно: не больше " + chars(el.maxLength);
+    // Числовые поля Q1 и Q4: у браузера для них свои состояния, и без этих
+    // веток кандидат увидел бы общее «Проверьте формат».
+    if (v.badInput) return "Введите число";
+    if (v.stepMismatch) return "Только целое число, без дробной части";
+    if (v.rangeUnderflow) return "Число не может быть отрицательным";
+    if (v.rangeOverflow) return "Слишком большое число";
     return (el.getAttribute("title") || "").trim() || FORMAT_TEXT;
   }
 

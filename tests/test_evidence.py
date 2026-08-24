@@ -2,7 +2,7 @@
 import pytest
 
 from app.llm import normalize
-from app.models import ScorerOutput
+from app.models import MODEL_QKEYS, ScorerOutput
 from app.scorer import enforce_evidence
 
 ANSWER = "В мае я закрыл 4 сделки — выручка составила 480 000 ₽, средний чек 120 000 ₽."
@@ -10,17 +10,19 @@ ANSWER = "В мае я закрыл 4 сделки — выручка соста
 
 def make(evidence: dict, scores=None) -> ScorerOutput:
     return ScorerOutput(
-        scores=scores or {k: 3 for k in ["q1", "q2", "q3", "q4", "q5"]},
-        evidence={k: evidence.get(k, "") for k in ["q1", "q2", "q3", "q4", "q5"]},
-        auto_filters={"q3_senior_dm_confirmed": True, "q1_personal_result_confirmed": True},
+        scores=scores or {k: 3 for k in MODEL_QKEYS},
+        evidence={k: evidence.get(k, "") for k in MODEL_QKEYS},
+        auto_filters={"q3_senior_dm_confirmed": True, "q1_definition_ok": True},
         ai_style=10,
         ai_markers=[],
         screening_questions=["а", "б", "в"],
     )
 
 
-def answers(q1=ANSWER):
-    return {"q1_text": q1, "q2_text": "", "q3_text": "", "q4_text": "", "q5_text": ""}
+def answers(q2=ANSWER):
+    # Проверяется судьба q2: балл за q1 модель больше не ставит, и цитат по
+    # нему не даёт — его считает checks.q1_score по числам из формы.
+    return {"q1_text": "", "q2_text": q2, "q3_text": "", "q4_text": "", "q5_text": ""}
 
 
 @pytest.mark.parametrize(
@@ -37,10 +39,10 @@ def answers(q1=ANSWER):
     ],
 )
 def test_normalization_keeps_honest_quotes(quote, kept, case):
-    # Баллы q2..q5 намеренно оставлены без цитат — они обнуляются, здесь
-    # проверяется только судьба q1.
-    result, _ = enforce_evidence(make({"q1": quote}), answers())
-    assert (result.scores["q1"] == 3) is kept, f"{case}: {quote!r}"
+    # Остальные баллы намеренно оставлены без цитат — они обнуляются, здесь
+    # проверяется только судьба q2.
+    result, _ = enforce_evidence(make({"q2": quote}), answers())
+    assert (result.scores["q2"] == 3) is kept, f"{case}: {quote!r}"
 
 
 def test_long_quote_is_retelling():
@@ -49,11 +51,11 @@ def test_long_quote_is_retelling():
     quote_16 = " ".join(f"слово{i}" for i in range(16))
     quote_15 = " ".join(f"слово{i}" for i in range(15))
 
-    r, _ = enforce_evidence(make({"q1": quote_16}), answers(long_answer))
-    assert r.scores["q1"] == 0, "16 слов — обнуляем"
+    r, _ = enforce_evidence(make({"q2": quote_16}), answers(long_answer))
+    assert r.scores["q2"] == 0, "16 слов — обнуляем"
 
-    r, _ = enforce_evidence(make({"q1": quote_15}), answers(long_answer))
-    assert r.scores["q1"] == 3, "ровно 15 слов — оставляем"
+    r, _ = enforce_evidence(make({"q2": quote_15}), answers(long_answer))
+    assert r.scores["q2"] == 3, "ровно 15 слов — оставляем"
 
 
 def test_zero_scores_are_not_touched():

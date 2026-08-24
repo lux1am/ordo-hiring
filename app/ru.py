@@ -6,7 +6,6 @@
 from app.checks import (
     FLAG_MATH,
     FLAG_MOBILE,
-    FLAG_NO_NUMBERS,
     FLAG_OUTLIER,
     FLAG_PASTED,
     FLAG_SUSPICIOUS,
@@ -28,7 +27,6 @@ FLAG_NAMES = {
     FLAG_TAB_SWITCH: "долгий уход со страницы перед ответом",
     FLAG_MATH: "расхождение в цифрах по вопросу 1",
     FLAG_OUTLIER: "нереалистичная конверсия по вопросу 4",
-    FLAG_NO_NUMBERS: "числа из ответов не извлеклись",
     FLAG_MOBILE: "заполнено с телефона",
 }
 

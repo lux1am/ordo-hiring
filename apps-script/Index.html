@@ -50,7 +50,7 @@
   .hint { color: var(--muted); font-size: 14px; font-weight: 400; margin-bottom: 8px; }
   .field { margin-bottom: 20px; }
   .field:last-child { margin-bottom: 0; }
-  input[type=text], input[type=url], textarea {
+  input[type=text], input[type=url], input[type=number], textarea {
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--line);
@@ -66,6 +66,28 @@
     border-color: var(--accent);
   }
   textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
+  /* Числовые блоки Q1 и Q4. Числа кандидат вводит полями, а не текстом:
+     так их не нужно вылавливать из фразы, и они сразу пригодны для сверки. */
+  .numbers { margin: 0 0 16px; }
+  .month-row {
+    display: grid;
+    grid-template-columns: 132px repeat(3, 1fr);
+    gap: 10px;
+    align-items: end;
+    margin-bottom: 10px;
+  }
+  .month-name { font-weight: 550; padding-bottom: 11px; }
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .num-cell label {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--muted);
+    margin-bottom: 5px;
+  }
+  /* Подписи колонок повторяются в каждой строке месяца — на широком экране
+     это шум, поэтому видна только первая. На узком сетка перестраивается,
+     и подписи возвращаются: там строки идут одна под другой. */
+  .month-row + .month-row .num-cell label { visibility: hidden; }
   .counter { font-size: 13px; color: var(--muted); margin-top: 6px; }
   .counter.ok { color: #15803d; }
   .counter.limit { color: #c2410c; }
@@ -140,6 +162,10 @@
     section { padding: 16px; border-radius: 6px; }
     h1 { font-size: 21px; }
     .radio-row label { flex: 1 1 100%; }
+    .month-row { grid-template-columns: 1fr; gap: 8px; margin-bottom: 18px; }
+    .month-name { padding-bottom: 0; }
+    .month-row + .month-row .num-cell label { visibility: visible; }
+    .metrics { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -212,6 +238,41 @@
       <div class="field">
         <span class="q-num"><?= oq.label ?></span>
         <div class="q-text"><?= oq.text ?></div>
+        <? if (oq.months) { ?>
+        <div class="numbers">
+          <? for (var s = 0; s < oq.months.slots.length; s++) {
+               var slot = oq.months.slots[s]; ?>
+          <div class="month-row">
+            <div class="month-name" data-month-label="<?= slot ?>"></div>
+            <input type="hidden" name="q1_<?= slot ?>_month" data-month-value="<?= slot ?>">
+            <? for (var c = 0; c < oq.months.columns.length; c++) {
+                 var col = oq.months.columns[c];
+                 var name = 'q1_' + slot + '_' + col.key; ?>
+            <div class="num-cell">
+              <label for="<?= name ?>"><?= col.label ?></label>
+              <input type="number" inputmode="numeric" step="1" min="0" max="<?= col.max ?>"
+                id="<?= name ?>" name="<?= name ?>" required>
+              <div class="field-error" data-error-for="<?= name ?>"></div>
+            </div>
+            <? } ?>
+          </div>
+          <? } ?>
+        </div>
+        <? } ?>
+        <? if (oq.metrics) { ?>
+        <div class="numbers metrics">
+          <? for (var k = 0; k < oq.metrics.length; k++) {
+               var metric = oq.metrics[k]; ?>
+          <div class="num-cell">
+            <label for="<?= metric.field ?>"><?= metric.label ?></label>
+            <input type="number" inputmode="numeric" step="1" min="0" max="<?= metric.max ?>"
+              id="<?= metric.field ?>" name="<?= metric.field ?>" required>
+            <div class="field-error" data-error-for="<?= metric.field ?>"></div>
+          </div>
+          <? } ?>
+        </div>
+        <? } ?>
+        <? if (oq.text_label) { ?><div class="hint"><?= oq.text_label ?></div><? } ?>
         <textarea id="<?= oq.field ?>" name="<?= oq.field ?>" data-telemetry="<?= oq.field ?>"
           data-min="<?= oq.min_length || 0 ?>"
           <? if (oq.max_length) { ?>maxlength="<?= oq.max_length ?>"<? } ?>
@@ -310,6 +371,30 @@ window.submitPayload = function (data) {
     if (length >= min) return { text: "достаточно", cls: "counter ok" };
     if (length === 0) return { text: "минимум " + chars(min), cls: "counter" };
     return { text: shortfallText(min - length), cls: "counter" };
+  }
+
+  // Месяцы вопроса 1 считает браузер, а не сборка: статическая страница
+  // собирается один раз при деплое, и зашитые в неё названия через квартал
+  // спрашивали бы уже не про последние три месяца. Сервер пересчитывает их
+  // сам и присланному значению не верит — см. normalize_month.
+  var MONTHS_RU = [
+    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
+  ];
+
+  // Последние `count` полных месяцев, самый ранний первым. Полный — значит
+  // завершившийся: про текущий месяц кандидату ещё нечего сказать.
+  function monthSlots(now, count) {
+    var out = [];
+    for (var i = 0; i < count; i++) {
+      var d = new Date(now.getFullYear(), now.getMonth() - (count - i), 1);
+      var month = d.getMonth() + 1;
+      out.push({
+        label: MONTHS_RU[d.getMonth()] + " " + d.getFullYear(),
+        value: d.getFullYear() + "-" + (month < 10 ? "0" : "") + month
+      });
+    }
+    return out;
   }
 
   var REQUIRED_TEXT = "Заполните это поле";
@@ -416,6 +501,21 @@ window.submitPayload = function (data) {
     }
   });
 
+  // ------------------------ Месяцы вопроса 1 -----------------------------
+
+  (function fillMonths() {
+    var labels = document.querySelectorAll("[data-month-label]");
+    if (!labels.length) return;
+    var slots = monthSlots(new Date(), labels.length);
+    Array.prototype.forEach.call(labels, function (el, i) {
+      el.textContent = slots[i].label;
+      var hidden = document.querySelector(
+        '[data-month-value="' + el.getAttribute("data-month-label") + '"]'
+      );
+      if (hidden) hidden.value = slots[i].value;
+    });
+  })();
+
   // ------------------------- Отправка ------------------------------------
 
   var form = document.getElementById("form");
@@ -470,6 +570,12 @@ window.submitPayload = function (data) {
     }
     if (v.tooShort) return "Слишком коротко: нужно хотя бы " + chars(el.minLength);
     if (v.tooLong) return "Слишком длинно: не больше " + chars(el.maxLength);
+    // Числовые поля Q1 и Q4: у браузера для них свои состояния, и без этих
+    // веток кандидат увидел бы общее «Проверьте формат».
+    if (v.badInput) return "Введите число";
+    if (v.stepMismatch) return "Только целое число, без дробной части";
+    if (v.rangeUnderflow) return "Число не может быть отрицательным";
+    if (v.rangeOverflow) return "Слишком большое число";
     return (el.getAttribute("title") || "").trim() || FORMAT_TEXT;
   }
 

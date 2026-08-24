@@ -668,3 +668,60 @@ def test_server_still_requires_stop_answers():
 def test_report_validity_still_called():
     """Вызов остаётся: он нужен при программной отправке."""
     assert "form.reportValidity()" in block("<script data-shared>", FORM_HTML)
+
+# --------------------------- числовые поля --------------------------------
+
+def expected_number_fields() -> list[str]:
+    """Имена всех числовых полей — из questions.json, а не списком в тесте."""
+    questions = json.loads((ROOT / "questions.json").read_text(encoding="utf-8"))
+    names = []
+    for q in questions["open_questions"]:
+        months = q.get("months")
+        if months:
+            for slot in months["slots"]:
+                names += [f"q1_{slot}_{c['key']}" for c in months["columns"]]
+                names.append(f"q1_{slot}_month")
+        for metric in q.get("metrics", []):
+            names.append(metric["field"])
+    return names
+
+
+def test_rendered_page_has_every_number_field():
+    """Собранная страница содержит все двенадцать полей и три скрытых месяца.
+
+    Проверяется именно dist/index.html: в шаблонах имена полей склеиваются
+    в цикле, и буквального `name="q1_m1_deals"` там нет — а на домен
+    уезжает уже развёрнутая разметка.
+    """
+    for field in expected_number_fields():
+        assert f'name="{field}"' in DIST_HTML, f"в dist/index.html нет поля {field}"
+    assert DIST_HTML.count('type="number"') == 12
+
+
+@pytest.mark.parametrize("html,name", VARIANTS, ids=VARIANT_IDS)
+def test_number_inputs_are_integer_only(html, name):
+    """Целые и неотрицательные — иначе браузер пропустит 4.5 или -3."""
+    # Скриптлеты Apps Script содержат «>» внутри себя и рвут разбор тега,
+    # поэтому сначала схлопываются в заглушку.
+    clean = re.sub(r"<\?.*?\?>", "X", html, flags=re.S)
+    tags = re.findall(r'<input type="number"[^>]*>', clean)
+    assert tags, f"{name}: числовых полей нет вовсе"
+    for tag in tags:
+        assert 'step="1"' in tag, f"{name}: числовое поле без step=1 — {tag}"
+        assert 'min="0"' in tag, f"{name}: числовое поле без min=0 — {tag}"
+        assert "max=" in tag, f"{name}: числовое поле без верхнего предела — {tag}"
+        assert "required" in tag, f"{name}: числовое поле не обязательное — {tag}"
+
+
+@pytest.mark.parametrize("html,name", VARIANTS, ids=VARIANT_IDS)
+def test_month_names_come_from_the_browser(html, name):
+    """Месяцы подставляет браузер, в разметке они пустые.
+
+    Статическая страница собирается один раз при деплое — зашитый в неё
+    «Май» через квартал спрашивал бы уже не про последний полный месяц.
+    """
+    assert "data-month-label=" in html, f"{name}: нет подписи месяца"
+    assert re.search(r'data-month-label="[^"]*"\s*></div>', html), (
+        f"{name}: в разметке проставлено готовое название месяца"
+    )
+    assert "monthSlots(new Date()" in html, f"{name}: месяцы не считаются в браузере"

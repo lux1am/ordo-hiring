@@ -28,7 +28,8 @@ from app.config import (
 )
 from app.checks import telemetry_flags
 from app.models import OPEN_FIELDS, STOP_FIELDS, Submission, Telemetry
-from app.pipeline import build_form_row, build_result_row, new_id, process_row
+from app.numbers import validate_q1, validate_q4
+from app.pipeline import build_form_row, build_result_row, new_id, now_local, process_row
 from app import ru
 
 setup_logging()
@@ -160,6 +161,16 @@ async def submit(request: Request, background: BackgroundTasks):
         log.warning("телеметрия не разобралась, продолжаю с пустой")
         telemetry = Telemetry()
 
+    # Числа проверяются до анкеты: ошибку про конкретное поле нужно вернуть
+    # с его именем, чтобы форма показала её под этим полем.
+    today = now_local().date()
+    q1_numbers, number_errors = validate_q1(raw, today)
+    q4_numbers, q4_errors = validate_q4(raw)
+    number_errors.update(q4_errors)
+    if number_errors:
+        log.info("числовые поля не прошли проверку: %s", number_errors)
+        return _render_error(request, number_errors, raw)
+
     try:
         sub = Submission(
             fio=str(raw.get("fio", "")),
@@ -169,6 +180,8 @@ async def submit(request: Request, background: BackgroundTasks):
             stops={f: str(raw[f]) for f in STOP_FIELDS if raw.get(f)},
             answers={f: str(raw.get(f, "")) for f in OPEN_FIELDS},
             telemetry=telemetry,
+            q1_numbers=q1_numbers,
+            q4_numbers=q4_numbers,
         )
     except ValidationError as e:
         errors = _errors_by_field(e)

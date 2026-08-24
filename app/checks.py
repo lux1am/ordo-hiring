@@ -1,8 +1,11 @@
 """Автоматические проверки без обращения к модели.
 
-Здесь только чистые функции над уже готовыми числами. Извлечение чисел из
-свободного текста живёт в extractor.py — так эти правила остаются
-детерминированными и тестируются без сети.
+Здесь только чистые функции над уже готовыми числами. Числа кандидат
+вводит сам в отдельные поля формы, разбирает их numbers.py — ни одно
+правило отсюда не обращается к сети и не зависит от трактовки текста.
+
+Тут же считается балл за Q1: он выводится из девяти чисел арифметически,
+поэтому спорную анкету можно пересчитать руками и получить тот же балл.
 """
 import logging
 
@@ -10,13 +13,15 @@ from app.config import (
     CONVERSION_OUTLIER_THRESHOLD,
     MATH_TOLERANCE,
     PASTE_PCT_THRESHOLD,
-    Q1_MIN_CONFIRMED_MONTHS,
+    Q1_CHECK_SPREAD_MAX,
+    Q1_STABLE_MIN_DEALS,
     SPEED_CPM_THRESHOLD_DESKTOP,
     SPEED_CPM_THRESHOLD_MOBILE,
     SUSPICIOUS_MIN_LENGTH,
     TAB_AWAY_SECONDS_THRESHOLD,
 )
-from app.models import OPEN_FIELDS, ExtractorOutput, Submission, Telemetry
+from app.models import OPEN_FIELDS, Submission, Telemetry
+from app.numbers import Q1Numbers, Q4Numbers
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +31,6 @@ FLAG_SUSPICIOUS = "SUSPICIOUS"
 FLAG_TAB_SWITCH = "TAB_SWITCH"
 FLAG_MATH = "MATH"
 FLAG_OUTLIER = "OUTLIER"
-FLAG_NO_NUMBERS = "NO_NUMBERS"
 FLAG_MOBILE = "MOBILE"
 
 
@@ -69,41 +73,82 @@ def telemetry_flags(sub: Submission) -> list[str]:
     return flags
 
 
-def numeric_flags(ex: ExtractorOutput | None) -> list[str]:
-    """Флаги по числам из Q1 и Q4. None — экстрактор не отработал."""
-    if ex is None or not ex.has_any_numbers():
-        return [FLAG_NO_NUMBERS]
+def numeric_flags(q1: Q1Numbers, q4: Q4Numbers) -> list[str]:
+    """Флаги по числам из формы. Флага «чисел нет» больше не бывает.
 
+    Все двенадцать полей обязательные, так что пустой анкеты сюда не
+    доходит: вместо флага о нехватке данных ноль за Q1 ставит q1_score.
+    """
     flags: list[str] = []
 
     # Сверка: сделки × средний чек ≈ выручка, допуск 10%.
-    for m in ex.confirmed_months():
-        expected = m.deals * m.avg_check
+    for m in q1.filled():
+        expected = m.deals * m.check
         if expected <= 0:
             continue
         if abs(expected - m.revenue) / expected > MATH_TOLERANCE:
             log.info(
-                "MATH: месяц %s — %.0f × %.0f = %.0f, заявлено %.0f",
-                m.month, m.deals, m.avg_check, expected, m.revenue,
+                "MATH: месяц %s — %d × %d = %d, заявлено %d",
+                m.month, m.deals, m.check, expected, m.revenue,
             )
             _add(flags, FLAG_MATH)
 
     # Конверсия выше 50% для холодного outbound — выброс.
-    for conv in (ex.conv_touch_meeting, ex.conv_meeting_deal):
-        if conv is not None and conv > CONVERSION_OUTLIER_THRESHOLD:
+    for conv in (q4.conv_touch, q4.conv_deal):
+        if conv > CONVERSION_OUTLIER_THRESHOLD:
             _add(flags, FLAG_OUTLIER)
 
     return flags
 
 
-def q1_needs_manual(ex: ExtractorOutput | None) -> bool:
-    """Меньше двух месяцев с полной тройкой чисел — смотреть руками.
+def checks_comparable(months: list) -> bool:
+    """Средние чеки лежат в одном диапазоне: максимум не больше 2× минимума.
 
-    Полная тройка = сделки, выручка и средний чек одновременно.
+    Разброс на порядок означает, что месяцы несопоставимы — одна крупная
+    сделка не то же самое, что ровный поток, и балл за стабильность за неё
+    не даётся.
     """
-    if ex is None:
-        return True
-    return len(ex.confirmed_months()) < Q1_MIN_CONFIRMED_MONTHS
+    checks = [m.check for m in months]
+    if not checks or min(checks) <= 0:
+        return False
+    return max(checks) <= min(checks) * Q1_CHECK_SPREAD_MAX
+
+
+def q1_score(q1: Q1Numbers, definition_ok: bool) -> int:
+    """Балл за Q1 по числам. Модель на него не влияет.
+
+    0 — везде нули: результата за три месяца нет.
+    1 — цифры есть не за все месяцы.
+    2 — заполнены все три месяца.
+    3 — плюс стабильность: минимум 3 сделки в каждом месяце и сопоставимые
+        средние чеки.
+
+    Без внятного определения закрытой сделки балл упирается в 2: цифры,
+    про которые неизвестно, что именно ими считали, не доказывают
+    стабильного результата.
+    """
+    months = q1.months
+    filled = q1.filled()
+
+    if not filled:
+        score = 0
+    elif len(filled) < len(months):
+        score = 1
+    else:
+        stable = (
+            all(m.deals >= Q1_STABLE_MIN_DEALS for m in filled)
+            and checks_comparable(filled)
+        )
+        score = 3 if stable else 2
+
+    if not definition_ok:
+        score = min(score, 2)
+
+    log.info(
+        "q1: балл %d (месяцев с результатом %d из %d, определение %s)",
+        score, len(filled), len(months), "есть" if definition_ok else "нет",
+    )
+    return score
 
 
 def _add(flags: list[str], flag: str) -> None:

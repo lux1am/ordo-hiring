@@ -1,31 +1,73 @@
 {
-  "name": "Слабый кандидат, общие слова без цифр",
+  "name": "Слабый кандидат: нули в цифрах и общие слова",
   "stops": {
-    "stop_1_oklad": "Да", "stop_2_komissiya": "Да", "stop_3_kasaniya": "Да",
-    "stop_4_vstrechi": "Да", "stop_5_vedenie": "Да", "stop_6_crm": "Да"
+    "stop_1_oklad": "Да",
+    "stop_2_komissiya": "Да",
+    "stop_3_kasaniya": "Да",
+    "stop_4_vstrechi": "Да",
+    "stop_5_vedenie": "Да",
+    "stop_6_crm": "Да"
   },
   "answers": {
-    "q1_text": "Работал в продажах несколько лет, стабильно выполнял план и закрывал сделки. Показатели были на хорошем уровне, руководство было довольно результатами нашей команды.",
+    "q1_text": "Март 2026: 0 / 0 / 0; Апрель 2026: 0 / 0 / 0; Май 2026: 0 / 0 / 0 — Точных цифр не помню, отдельно закрытые сделки я никак не фиксировал.",
     "q2_text": "В основном работал с входящими заявками с сайта и от маркетинга. Иногда прозванивал старую базу клиентов, но системного холодного потока у меня не было.",
     "q3_text": "Общался с менеджерами по закупкам и специалистами отделов. Иногда подключался руководитель, но решение принимали без меня, я больше отвечал за подготовку материалов.",
-    "q4_text": "Воронку вела CRM, я смотрел свои сделки в системе. Конкретных цифр по конверсиям не считал, ориентировался на то, сколько сделок в работе.",
+    "q4_text": "Касание→встреча: 0%; Встреча→оплата: 0%; Цикл сделки: 0 дн — Конверсии не считал, ориентировался на то, сколько сделок висит в работе.",
     "q5_text": "Был сложный клиент, долго не могли договориться по условиям. В итоге нашли компромисс и подписали договор, клиент остался доволен сотрудничеством."
   },
   "telemetry": {
-    "is_mobile": false, "tab_switches": 1, "total_time_sec": 620,
+    "is_mobile": false,
+    "tab_switches": 1,
+    "total_time_sec": 620,
     "fields": {
-      "q1_text": {"length": 165, "pasted_chars": 0, "speed_cpm": 140, "backspaces": 12},
-      "q2_text": {"length": 155, "pasted_chars": 0, "speed_cpm": 135, "backspaces": 9},
-      "q3_text": {"length": 165, "pasted_chars": 0, "speed_cpm": 142, "backspaces": 11},
-      "q4_text": {"length": 140, "pasted_chars": 0, "speed_cpm": 130, "backspaces": 8},
-      "q5_text": {"length": 150, "pasted_chars": 0, "speed_cpm": 138, "backspaces": 10}
+      "q1_text": {
+        "length": 165,
+        "pasted_chars": 0,
+        "speed_cpm": 140,
+        "backspaces": 12
+      },
+      "q2_text": {
+        "length": 155,
+        "pasted_chars": 0,
+        "speed_cpm": 135,
+        "backspaces": 9
+      },
+      "q3_text": {
+        "length": 165,
+        "pasted_chars": 0,
+        "speed_cpm": 142,
+        "backspaces": 11
+      },
+      "q4_text": {
+        "length": 140,
+        "pasted_chars": 0,
+        "speed_cpm": 130,
+        "backspaces": 8
+      },
+      "q5_text": {
+        "length": 150,
+        "pasted_chars": 0,
+        "speed_cpm": 138,
+        "backspaces": 10
+      }
     }
   },
-  "extracted": {"months": [], "conv_touch_meeting": null, "conv_meeting_deal": null},
-  "auto_filters": {"q3_senior_dm_confirmed": false, "q1_personal_result_confirmed": false},
+  "auto_filters": {
+    "q3_senior_dm_confirmed": false,
+    "q1_definition_ok": false
+  },
   "ai_style": 35,
   "expected": {
-    "scores": {"q1": 0, "q2": 0, "q3": 0, "q4": 0, "q5": 0},
-    "total": 0, "verdict": "C", "status": "manual", "flags": ["NO_NUMBERS"]
+    "scores": {
+      "q1": 0,
+      "q2": 0,
+      "q3": 0,
+      "q4": 0,
+      "q5": 0
+    },
+    "total": 0,
+    "verdict": "C",
+    "status": "done",
+    "flags": []
   }
 }
