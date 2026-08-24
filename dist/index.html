@@ -1,0 +1,835 @@
+<!doctype html>
+<!--
+  Источник формы для всех трёх вариантов. Здесь она живёт как шаблон
+  FastAPI; apps-script/build_gs.py переносит отсюда CSS и JS телеметрии
+  дословно в apps-script/Index.html и собирает страницу целиком в
+  dist/index.html — статическую версию для своего домена.
+
+  Правки разметки, CSS и JS делайте здесь и пересобирайте: npm run build.
+  Свой у каждого варианта только адаптер отправки — блок скрипта с
+  атрибутом data-adapter. Разметка Apps Script лежит отдельно в
+  templates/apps-script-index.html: шаблонизатор там свой.
+-->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Анкета кандидата — B2B-продажи</title>
+<style>
+  :root {
+    --bg: #f5f5f4;
+    --card: #ffffff;
+    --text: #1c1917;
+    --muted: #57534e;
+    --line: #d6d3d1;
+    --accent: #1c1917;
+    --error-bg: #fef2f2;
+    --error-line: #dc2626;
+    --error-text: #991b1b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 64px;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 700px; margin: 0 auto; }
+  header { margin-bottom: 24px; }
+  h1 { font-size: 24px; line-height: 1.25; margin: 0 0 12px; font-weight: 650; }
+  .intro { color: var(--muted); margin: 0; }
+  section {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--muted);
+    margin: 0 0 16px;
+    font-weight: 600;
+  }
+  label { display: block; font-weight: 550; margin-bottom: 6px; }
+  .hint { color: var(--muted); font-size: 14px; font-weight: 400; margin-bottom: 8px; }
+  .field { margin-bottom: 20px; }
+  .field:last-child { margin-bottom: 0; }
+  input[type=text], input[type=url], textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--text);
+    font: inherit;
+    font-size: 16px; /* меньше 16px — iOS зумит страницу при фокусе */
+  }
+  input:focus, textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+    border-color: var(--accent);
+  }
+  textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
+  .counter { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .counter.ok { color: #15803d; }
+  .field-error {
+    font-size: 14px;
+    color: var(--error-text);
+    margin-top: 6px;
+  }
+  .field-error:empty { display: none; }
+  .success { text-align: center; }
+  .success h2 { font-size: 20px; margin: 0 0 10px; font-weight: 650; }
+  .success p { color: var(--muted); margin: 0 0 8px; }
+  .success p:last-child { margin-bottom: 0; }
+  .q-text { font-weight: 400; color: var(--text); margin-bottom: 10px; }
+  .q-num { font-weight: 650; display: block; margin-bottom: 4px; }
+  .radio-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .radio-row label {
+    flex: 1 1 120px;
+    margin: 0;
+    padding: 11px 14px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    text-align: center;
+    cursor: pointer;
+    font-weight: 500;
+    background: #fff;
+    user-select: none;
+  }
+  .radio-row input { position: absolute; opacity: 0; pointer-events: none; }
+  .radio-row input:checked + span { font-weight: 650; }
+  .radio-row label:has(input:checked) {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+    background: #fafaf9;
+  }
+  .stop-q { padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+  .stop-q:last-child { border-bottom: 0; padding-bottom: 0; margin-bottom: 0; }
+  .consent { display: flex; gap: 10px; align-items: flex-start; }
+  .consent input { margin-top: 4px; width: 18px; height: 18px; flex-shrink: 0; }
+  .consent label { font-weight: 400; margin: 0; }
+  /* Отступ слева выравнивает примечание с текстом согласия, а не с чекбоксом. */
+  .consent-note { margin: 10px 0 0 28px; }
+  button {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+    border-radius: 6px;
+    font: inherit;
+    font-weight: 600;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: .55; cursor: default; }
+  .error {
+    background: var(--error-bg);
+    border: 1px solid var(--error-line);
+    border-left-width: 3px;
+    color: var(--error-text);
+    padding: 14px 16px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+  }
+  /* Приманка для ботов: невидима для человека, но не hidden — часть автозаполнялок его пропускает. */
+  .hp {
+    position: absolute; left: -9999px; width: 1px; height: 1px;
+    overflow: hidden; opacity: 0;
+  }
+  @media (max-width: 560px) {
+    body { padding: 16px 12px 48px; }
+    section { padding: 16px; border-radius: 6px; }
+    h1 { font-size: 21px; }
+    .radio-row label { flex: 1 1 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Анкета кандидата — B2B-продажи</h1>
+    <p class="intro">Отвечайте своими словами и с конкретными цифрами. Ответы без цифр и без примеров не проходят отбор. Заполнение занимает 20–30 минут.</p>
+  </header>
+
+  
+
+  <form method="post" action="https://script.google.com/macros/s/AKfycbw0gzVmKXuMQ8zf4_3MTdKxSLCLy1KrJy6kze18GCJtqAVsWpD8d5hkot6VVpqZZDEDXQ/exec" id="form">
+    <div class="hp" aria-hidden="true">
+      <label for="company_website">Не заполняйте это поле</label>
+      <input type="text" id="company_website" name="company_website" tabindex="-1" autocomplete="off">
+    </div>
+
+    <section>
+      <h2>О себе</h2>
+      <div class="field">
+        <label for="fio">Фамилия, имя, отчество (при наличии)</label>
+        <input type="text" id="fio" name="fio" autocomplete="name"
+          value="" required
+          minlength="5" maxlength="200" pattern="\S+\s+\S+.*"
+          title="Укажите имя и фамилию через пробел">
+        <div class="field-error" data-error-for="fio"></div>
+      </div>
+      <div class="field">
+        <label for="telegram">Telegram</label>
+        <div class="hint">Например, @username</div>
+        <input type="text" id="telegram" name="telegram" autocomplete="off"
+          value="" required
+          pattern="\s*(?:https?://)?(?:t\.me/)?@?[A-Za-z0-9_]{4,32}\s*"
+          title="Например: @username или t.me/username">
+        <div class="field-error" data-error-for="telegram"></div>
+      </div>
+      <div class="field">
+        <label for="resume_url">Ссылка на резюме или профиль на площадке</label>
+        <div class="hint">hh.ru, LinkedIn, Google Docs или любая открытая ссылка</div>
+        <input type="url" id="resume_url" name="resume_url"
+          value="" required maxlength="2000"
+          title="Ссылка должна начинаться с http:// или https://">
+        <div class="field-error" data-error-for="resume_url"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Условия работы</h2>
+      
+      <div class="stop-q">
+        <div class="q-text">Готовы работать без фиксированного оклада?</div>
+        <div class="radio-row">
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_1_oklad" value="Да"
+              ><span>Да</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_1_oklad" value="Нет"
+              ><span>Нет</span>
+          </label>
+          
+        </div>
+        <div class="field-error" data-error-for="stop_1_oklad"></div>
+      </div>
+      
+      <div class="stop-q">
+        <div class="q-text">Согласны получать комиссию после завершения проекта?</div>
+        <div class="radio-row">
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_2_komissiya" value="Да"
+              ><span>Да</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_2_komissiya" value="Нет"
+              ><span>Нет</span>
+          </label>
+          
+        </div>
+        <div class="field-error" data-error-for="stop_2_komissiya"></div>
+      </div>
+      
+      <div class="stop-q">
+        <div class="q-text">Готовы делать 120–150 касаний в неделю?</div>
+        <div class="radio-row">
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_3_kasaniya" value="Да"
+              ><span>Да</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_3_kasaniya" value="Нет"
+              ><span>Нет</span>
+          </label>
+          
+        </div>
+        <div class="field-error" data-error-for="stop_3_kasaniya"></div>
+      </div>
+      
+      <div class="stop-q">
+        <div class="q-text">Готовы проводить 15 квалифицированных встреч в неделю?</div>
+        <div class="radio-row">
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_4_vstrechi" value="Да"
+              ><span>Да</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_4_vstrechi" value="Нет"
+              ><span>Нет</span>
+          </label>
+          
+        </div>
+        <div class="field-error" data-error-for="stop_4_vstrechi"></div>
+      </div>
+      
+      <div class="stop-q">
+        <div class="q-text">Готовы самостоятельно вести сделку до завершения проекта?</div>
+        <div class="radio-row">
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_5_vedenie" value="Да"
+              ><span>Да</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_5_vedenie" value="Нет"
+              ><span>Нет</span>
+          </label>
+          
+        </div>
+        <div class="field-error" data-error-for="stop_5_vedenie"></div>
+      </div>
+      
+      <div class="stop-q">
+        <div class="q-text">Готовы фиксировать работу в CRM и участвовать в разборах звонков?</div>
+        <div class="radio-row">
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_6_crm" value="Да"
+              ><span>Да</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_6_crm" value="Нет"
+              ><span>Нет</span>
+          </label>
+          
+        </div>
+        <div class="field-error" data-error-for="stop_6_crm"></div>
+      </div>
+      
+    </section>
+
+    <section>
+      <h2>Опыт</h2>
+      
+      <div class="field">
+        <span class="q-num">Вопрос 1</span>
+        <div class="q-text">Сколько сделок вы лично закрывали за каждый из последних 3 полных месяцев? Укажите по каждому месяцу: количество завершённых проектов, сумму полученной выручки, средний чек, что вы считали закрытой сделкой.</div>
+        <textarea id="q1_text" name="q1_text" data-telemetry="q1_text"
+          data-min="80"
+          
+          required></textarea>
+        <div class="counter" data-counter-for="q1_text"></div>
+        <div class="field-error" data-error-for="q1_text"></div>
+      </div>
+      
+      <div class="field">
+        <span class="q-num">Вопрос 2</span>
+        <div class="q-text">Какой у вас был опыт outbound-продаж? Укажите: сколько холодных касаний делали в день и неделю, какие каналы использовали, сколько встреч назначали, какая была конверсия «касание → встреча», самостоятельно ли доводили сделки до оплаты.</div>
+        <textarea id="q2_text" name="q2_text" data-telemetry="q2_text"
+          data-min="80"
+          
+          required></textarea>
+        <div class="counter" data-counter-for="q2_text"></div>
+        <div class="field-error" data-error-for="q2_text"></div>
+      </div>
+      
+      <div class="field">
+        <span class="q-num">Вопрос 3</span>
+        <div class="q-text">С кем вы проводили переговоры и какие сделки закрывали лично? Укажите: должности участников переговоров, кто был пользователем, ЛПР и экономическим покупателем, средний чек, вашу роль от первого контакта до завершения проекта, 2–3 конкретных кейса с суммами.</div>
+        <textarea id="q3_text" name="q3_text" data-telemetry="q3_text"
+          data-min="80"
+          
+          required></textarea>
+        <div class="counter" data-counter-for="q3_text"></div>
+        <div class="field-error" data-error-for="q3_text"></div>
+      </div>
+      
+      <div class="field">
+        <span class="q-num">Вопрос 4</span>
+        <div class="q-text">Какие показатели своей воронки вы отслеживали? Укажите любые релевантные метрики: встреча → бриф, бриф → КП, КП → оплата, средний цикл сделки, средний чек, количество повторных касаний, доля новых клиентов и подписок. Для каждой метрики укажите период и этапы расчёта.</div>
+        <textarea id="q4_text" name="q4_text" data-telemetry="q4_text"
+          data-min="80"
+          
+          required></textarea>
+        <div class="counter" data-counter-for="q4_text"></div>
+        <div class="field-error" data-error-for="q4_text"></div>
+      </div>
+      
+      <div class="field">
+        <span class="q-num">Вопрос 5</span>
+        <div class="q-text">Опишите один сложный B2B-кейс: клиент, сумма, ЛПР, цикл, ключевое возражение, ваши действия и результат. До 700 знаков.</div>
+        <textarea id="q5_text" name="q5_text" data-telemetry="q5_text"
+          data-min="80"
+          maxlength="700"
+          required></textarea>
+        <div class="counter" data-counter-for="q5_text"></div>
+        <div class="field-error" data-error-for="q5_text"></div>
+      </div>
+      
+    </section>
+
+    <section>
+      <div class="consent">
+        <input type="checkbox" id="pdn_consent" name="pdn_consent" value="1"
+           required>
+        <label for="pdn_consent">Даю согласие на обработку персональных данных в целях рассмотрения моей кандидатуры.</label>
+      </div>
+      <div class="field-error" data-error-for="pdn_consent"></div>
+      <div class="hint consent-note">Форма фиксирует технические параметры заполнения — время и способ ввода. Эти данные не влияют на оценку и используются только для проверки подлинности ответов.</div>
+    </section>
+
+    <input type="hidden" name="telemetry" id="telemetry">
+    <div class="error" id="form-error" hidden></div>
+    <button type="submit" id="submit-btn">Отправить анкету</button>
+  </form>
+</div>
+
+<script data-adapter>
+// Отправка для статической версии на своём домене.
+//
+// Страница лежит на чужом для Apps Script origin, поэтому запрос обязан
+// быть «простым» — таким, который браузер шлёт без предварительного OPTIONS.
+// Apps Script на OPTIONS не отвечает и заголовков CORS не выдаёт, так что
+// preflight убил бы отправку ещё до неё. Простым POST делает Content-Type:
+// у text/plain preflight не требуется. Тело при этом остаётся JSON-строкой
+// — её разбирает doPost, см. parseBody в Code.gs.
+//
+// google.script.run здесь нет и быть не может: он существует только внутри
+// страницы, отданной самим Apps Script.
+var SUBMIT_URL = "https://script.google.com/macros/s/AKfycbw0gzVmKXuMQ8zf4_3MTdKxSLCLy1KrJy6kze18GCJtqAVsWpD8d5hkot6VVpqZZDEDXQ/exec";
+
+window.submitPayload = function (data) {
+  if (!SUBMIT_URL) {
+    // Страницу собрали, не зная адреса приёма. Молчать нельзя: кандидат
+    // иначе решит, что анкета ушла.
+    return Promise.resolve({
+      ok: false,
+      errors: {
+        _form: "Страница собрана без адреса приёма анкеты. " +
+               "Сообщите об этом, пожалуйста, тому, кто прислал ссылку."
+      }
+    });
+  }
+
+  return fetch(SUBMIT_URL, {
+    method: "POST",
+    // Заголовок ровно один и именно такой — любой другой тип содержимого
+    // (включая application/json) заставит браузер сделать preflight.
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(data),
+    // Apps Script отвечает редиректом на googleusercontent — по нему и
+    // приходит тело с заголовком, разрешающим чтение ответа.
+    redirect: "follow"
+  }).then(function (r) {
+    // Ответ может оказаться не JSON: страница входа Google, если доступ к
+    // развёртыванию закрыт, или HTML ошибки. Разбор не должен ронять
+    // отправку в консоль без объяснения.
+    return r.json().catch(function () {
+      return {
+        ok: false,
+        errors: {
+          _form: "Анкета не отправлена: сервер ответил неожиданным образом. " +
+                 "Попробуйте ещё раз через минуту."
+        }
+      };
+    });
+  });
+};
+</script>
+
+<script data-shared>
+(function () {
+  "use strict";
+
+  // Телефон определяем по типу указателя, а не только по user-agent:
+  // на мобильных Backspace через keydown приходит нестабильно, а свайп-ввод
+  // и автозамена дают такую скорость набора, что порог для настольных
+  // браузеров срабатывал бы почти на всех.
+  var isMobile = (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
+                 /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+  // Сервер меряет длину ответа после схлопывания пробелов. Счётчик под
+  // полем обязан считать так же, иначе кандидат видел бы одно, а получал
+  // отказ по другому.
+  function normalize(text) {
+    return String(text == null ? "" : text).replace(/\s+/g, " ").trim();
+  }
+
+  // Русские окончания: «остался 1 знак», «осталось 2 знака», «осталось 5 знаков».
+  function pluralRu(n, one, few, many) {
+    var mod10 = n % 10, mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return one;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+    return many;
+  }
+
+  function chars(n) {
+    return n + " " + pluralRu(n, "знак", "знака", "знаков");
+  }
+
+  function capitalize(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  // Счётчик показывает требование, а не прогресс: пока поле пустое — сколько
+  // нужно, дальше — сколько осталось, после порога — что минимум взят.
+  function counterText(length, min) {
+    if (length >= min) return "минимум набран";
+    if (length === 0) return "минимум " + chars(min);
+    return pluralRu(min - length, "остался", "осталось", "осталось") +
+      " " + chars(min - length);
+  }
+
+  var REQUIRED_TEXT = "Заполните это поле";
+  var CONSENT_REQUIRED_TEXT = "Отметьте согласие — без него анкету не отправить";
+  var FORMAT_TEXT = "Проверьте формат";
+
+  var PAUSE_MS = 5000;   // пауза дольше пяти секунд не считается временем набора
+  var startedAt = Date.now();
+  var tabSwitches = 0;
+  var hiddenAt = null;
+  var fieldAtHide = null;
+  var pendingAway = {};  // поле -> длительность последнего ухода, ещё не привязанная к вводу
+  var currentField = null;
+  var stats = {};
+
+  function statsFor(name) {
+    if (!stats[name]) {
+      stats[name] = {
+        length: 0, pasted_chars: 0, backspaces: 0,
+        active_ms: 0, last_input: 0, away_before_input_sec: 0
+      };
+    }
+    return stats[name];
+  }
+
+  var areas = document.querySelectorAll("textarea[data-telemetry]");
+
+  Array.prototype.forEach.call(areas, function (el) {
+    var name = el.getAttribute("data-telemetry");
+    var s = statsFor(name);
+    var counter = document.querySelector('[data-counter-for="' + name + '"]');
+
+    var min = parseInt(el.getAttribute("data-min"), 10) || 0;
+
+    // Счётчик и проверка длины идут по нормализованной строке — ровно так
+    // же, как считает сервер. Иначе ответ из 80 знаков с двойными пробелами
+    // показывал бы «минимум набран» и всё равно отклонялся.
+    function renderCounter() {
+      var length = normalize(el.value).length;
+      if (counter) {
+        counter.textContent = min ? counterText(length, min) : "";
+        counter.className = length >= min ? "counter ok" : "counter";
+      }
+      // Пустому полю про минимум говорить рано — это обычное «не заполнено».
+      // Проверка идёт раньше сравнения с min: при min = 0 пустое поле иначе
+      // осталось бы без своего текста, и браузер показал бы английский.
+      el.setCustomValidity(
+        length === 0 ? (el.required ? REQUIRED_TEXT : "") :
+        length >= min ? "" : capitalize(counterText(length, min))
+      );
+    }
+    renderCounter();
+
+    el.addEventListener("focus", function () { currentField = name; });
+
+    el.addEventListener("paste", function (e) {
+      var text = (e.clipboardData || window.clipboardData);
+      s.pasted_chars += text ? (text.getData("text") || "").length : 0;
+    });
+
+    el.addEventListener("keydown", function (e) {
+      if (e.key === "Backspace" || e.keyCode === 8) s.backspaces++;
+    });
+
+    el.addEventListener("input", function () {
+      var now = Date.now();
+      if (s.last_input) {
+        var dt = now - s.last_input;
+        if (dt > 0) s.active_ms += Math.min(dt, PAUSE_MS);
+      }
+      s.last_input = now;
+
+      // Кандидат уходил со вкладки, вернулся и дописывает именно это поле.
+      if (pendingAway[name]) {
+        s.away_before_input_sec = Math.max(s.away_before_input_sec, pendingAway[name]);
+        pendingAway[name] = 0;
+      }
+      s.length = el.value.length;
+      renderCounter();
+    });
+
+    el.addEventListener("input", function () {
+      var box = document.querySelector('[data-error-for="' + name + '"]');
+      if (box) box.textContent = "";
+    });
+  });
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      tabSwitches++;
+      hiddenAt = Date.now();
+      fieldAtHide = currentField;
+    } else if (hiddenAt) {
+      var away = (Date.now() - hiddenAt) / 1000;
+      if (fieldAtHide) {
+        pendingAway[fieldAtHide] = Math.max(pendingAway[fieldAtHide] || 0, away);
+      }
+      hiddenAt = null;
+      fieldAtHide = null;
+    }
+  });
+
+  // ------------------------- Отправка ------------------------------------
+
+  var form = document.getElementById("form");
+  var btn = document.getElementById("submit-btn");
+  var formError = document.getElementById("form-error");
+
+  var RADIO_REQUIRED_TEXT = "Выберите «Да» или «Нет»";
+
+  function radioGroups() {
+    var groups = {};
+    var inputs = form.querySelectorAll('input[type="radio"][name]');
+    Array.prototype.forEach.call(inputs, function (el) {
+      (groups[el.name] = groups[el.name] || []).push(el);
+    });
+    return groups;
+  }
+
+  // Радиогруппы проверяются своим кодом, а не атрибутом required: сами
+  // input скрыты стилями (роль кнопки играет label), и нативная валидация
+  // на скрытом поле способна заблокировать отправку, не показав сообщения.
+  // Тот же ответ проверяет и сервер — это вторая линия, не замена.
+  function validateRadioGroups() {
+    var errors = {};
+    var groups = radioGroups();
+    Object.keys(groups).forEach(function (name) {
+      var chosen = groups[name].some(function (el) { return el.checked; });
+      if (!chosen) errors[name] = RADIO_REQUIRED_TEXT;
+    });
+    return errors;
+  }
+
+  // Ошибка под группой гаснет, как только выбран вариант.
+  Object.keys(radioGroups()).forEach(function (name) {
+    radioGroups()[name].forEach(function (el) {
+      el.addEventListener("change", function () {
+        var box = document.querySelector('[data-error-for="' + name + '"]');
+        if (box) box.textContent = "";
+      });
+    });
+  });
+
+  // ------------------ нативные подсказки по-русски -----------------------
+  // Язык встроенных сообщений задаёт браузер кандидата, а не страница: в
+  // русской анкете всплыло бы «Please fill out this field». Поэтому текст
+  // каждого состояния задаётся здесь через setCustomValidity, а формат поля
+  // описывает его же title — он точнее любой общей фразы.
+  function validationText(el) {
+    var v = el.validity;
+    if (v.valid) return "";
+    if (v.valueMissing) {
+      return el.type === "checkbox" ? CONSENT_REQUIRED_TEXT : REQUIRED_TEXT;
+    }
+    if (v.tooShort) return "Слишком коротко: нужно хотя бы " + chars(el.minLength);
+    if (v.tooLong) return "Слишком длинно: не больше " + chars(el.maxLength);
+    return (el.getAttribute("title") || "").trim() || FORMAT_TEXT;
+  }
+
+  // Сообщение пересобирается на каждый ввод: пустое setCustomValidity
+  // возвращает полю нативные проверки, и validity читается уже по ним.
+  // Читать validity можно свободно — в отличие от checkValidity(), событие
+  // invalid она не шлёт, так что рекурсии здесь нет.
+  function refreshValidity(el) {
+    el.setCustomValidity("");
+    var text = validationText(el);
+    if (text) el.setCustomValidity(text);
+  }
+
+  Array.prototype.forEach.call(
+    form.querySelectorAll("input, textarea, select"),
+    function (el) {
+      // У textarea своё сообщение — про минимальную длину, см. renderCounter.
+      if (el.hasAttribute("data-telemetry") || el.type === "hidden") return;
+      var refresh = function () { refreshValidity(el); };
+      el.addEventListener("input", refresh);
+      el.addEventListener("change", refresh);
+      refresh();
+    }
+  );
+
+  function fillTelemetry() {
+    var fields = {};
+    Object.keys(stats).forEach(function (name) {
+      var s = stats[name];
+      var minutes = s.active_ms / 60000;
+      fields[name] = {
+        length: s.length,
+        pasted_chars: Math.min(s.pasted_chars, s.length),
+        speed_cpm: minutes > 0 ? Math.round(s.length / minutes) : 0,
+        backspaces: s.backspaces,
+        away_before_input_sec: Math.round(s.away_before_input_sec)
+      };
+    });
+
+    document.getElementById("telemetry").value = JSON.stringify({
+      is_mobile: isMobile,
+      tab_switches: tabSwitches,
+      total_time_sec: Math.round((Date.now() - startedAt) / 1000),
+      fields: fields
+    });
+  }
+
+  function collectPayload() {
+    var data = {};
+    var fd = new FormData(form);
+    fd.forEach(function (value, key) { data[key] = value; });
+    return data;
+  }
+
+  function clearErrors() {
+    var boxes = document.querySelectorAll("[data-error-for]");
+    Array.prototype.forEach.call(boxes, function (box) { box.textContent = ""; });
+    formError.textContent = "";
+    formError.hidden = true;
+  }
+
+  function showErrors(errors) {
+    var first = null;
+    var loose = [];
+    Object.keys(errors || {}).forEach(function (key) {
+      var box = document.querySelector('[data-error-for="' + key + '"]');
+      if (box) {
+        box.textContent = errors[key];
+        if (!first) first = box;
+      } else {
+        // Ошибки без своего поля — сбой записи, обрыв связи — идут полосой.
+        loose.push(errors[key]);
+      }
+    });
+    if (loose.length) {
+      formError.textContent = loose.join(" ");
+      formError.hidden = false;
+      if (!first) first = formError;
+    }
+    if (first && first.scrollIntoView) {
+      first.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+
+  function showSuccess() {
+    var card = document.createElement("section");
+    card.className = "success";
+    card.innerHTML =
+      "<h2>Спасибо, анкета отправлена</h2>" +
+      "<p>Мы изучим ваши ответы и свяжемся с вами в Telegram.</p>" +
+      "<p>Отправлять анкету повторно не нужно.</p>";
+    form.parentNode.replaceChild(card, form);
+    card.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  function setBusy(busy) {
+    btn.disabled = busy;
+    btn.textContent = busy ? "Отправляем…" : "Отправить анкету";
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    clearErrors();
+
+    // Стоп-вопросы проверяются первыми: их браузер не проверит сам.
+    var radioErrors = validateRadioGroups();
+    if (Object.keys(radioErrors).length) {
+      showErrors(radioErrors);
+      return;
+    }
+
+    // Остальное показывает сам браузер: незаполненные поля по required,
+    // слишком короткие ответы — по setCustomValidity выше.
+    if (!form.reportValidity()) return;
+
+    fillTelemetry();
+    setBusy(true);
+
+    var done = function (res) {
+      if (res && res.ok) {
+        showSuccess();
+        return;
+      }
+      setBusy(false);
+      showErrors((res && res.errors) || {});
+    };
+
+    var failed = function (err) {
+      setBusy(false);
+      var errors = {};
+      errors._form =
+        "Не удалось отправить анкету: " +
+        ((err && err.message) || "нет связи с сервером") +
+        ". Введённое сохранено, попробуйте ещё раз.";
+      showErrors(errors);
+    };
+
+    try {
+      // Каждый вариант формы определяет свой submitPayload: в Apps Script
+      // это google.script.run, в FastAPI — fetch. Всё остальное — разметка
+      // ошибок, блокировка кнопки, экран успеха — общее.
+      window.submitPayload(collectPayload()).then(done, failed);
+    } catch (err) {
+      failed(err);
+    }
+  });
+})();
+</script>
+</body>
+</html>

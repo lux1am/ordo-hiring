@@ -17,7 +17,7 @@
     <p class="intro"><?= QUESTIONS.intro ?></p>
   </header>
 
-  <form method="post" action="<?= formUrl ?>" id="form" novalidate>
+  <form method="post" action="<?= formUrl ?>" id="form">
     <div class="hp" aria-hidden="true">
       <label for="<?= honeypot ?>">Не заполняйте это поле</label>
       <input type="text" id="<?= honeypot ?>" name="<?= honeypot ?>" tabindex="-1" autocomplete="off">
@@ -26,18 +26,26 @@
     <section>
       <h2>О себе</h2>
       <div class="field">
-        <label for="fio">Фамилия, имя и отчество</label>
-        <input type="text" id="fio" name="fio" autocomplete="name" required>
+        <label for="fio">Фамилия, имя, отчество (при наличии)</label>
+        <input type="text" id="fio" name="fio" autocomplete="name" required
+          minlength="5" maxlength="200" pattern="\S+\s+\S+.*"
+          title="Укажите имя и фамилию через пробел">
+        <div class="field-error" data-error-for="fio"></div>
       </div>
       <div class="field">
         <label for="telegram">Telegram</label>
         <div class="hint">Например, @username</div>
-        <input type="text" id="telegram" name="telegram" autocomplete="off" required>
+        <input type="text" id="telegram" name="telegram" autocomplete="off" required
+          pattern="\s*(?:https?://)?(?:t\.me/)?@?[A-Za-z0-9_]{4,32}\s*"
+          title="Например: @username или t.me/username">
+        <div class="field-error" data-error-for="telegram"></div>
       </div>
       <div class="field">
-        <label for="resume_url">Ссылка на резюме</label>
+        <label for="resume_url">Ссылка на резюме или профиль на площадке</label>
         <div class="hint">hh.ru, LinkedIn, Google Docs или любая открытая ссылка</div>
-        <input type="url" id="resume_url" name="resume_url" required>
+        <input type="url" id="resume_url" name="resume_url" required maxlength="2000"
+          title="Ссылка должна начинаться с http:// или https://">
+        <div class="field-error" data-error-for="resume_url"></div>
       </div>
     </section>
 
@@ -48,13 +56,18 @@
       <div class="stop-q">
         <div class="q-text"><?= sq.text ?></div>
         <div class="radio-row">
+          <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+               роль кнопки играет label. Нативная валидация на скрытом поле
+               может заблокировать отправку, не показав сообщения. Ответ
+               проверяет сервер — см. validate() в Code.gs. -->
           <label>
-            <input type="radio" name="<?= sq.field ?>" value="Да" required><span>Да</span>
+            <input type="radio" name="<?= sq.field ?>" value="Да"><span>Да</span>
           </label>
           <label>
-            <input type="radio" name="<?= sq.field ?>" value="Нет" required><span>Нет</span>
+            <input type="radio" name="<?= sq.field ?>" value="Нет"><span>Нет</span>
           </label>
         </div>
+        <div class="field-error" data-error-for="<?= sq.field ?>"></div>
       </div>
       <? } ?>
     </section>
@@ -67,9 +80,11 @@
         <span class="q-num"><?= oq.label ?></span>
         <div class="q-text"><?= oq.text ?></div>
         <textarea id="<?= oq.field ?>" name="<?= oq.field ?>" data-telemetry="<?= oq.field ?>"
+          data-min="<?= oq.min_length || 0 ?>"
           <? if (oq.max_length) { ?>maxlength="<?= oq.max_length ?>"<? } ?>
           required></textarea>
         <div class="counter" data-counter-for="<?= oq.field ?>"></div>
+        <div class="field-error" data-error-for="<?= oq.field ?>"></div>
       </div>
       <? } ?>
     </section>
@@ -79,12 +94,29 @@
         <input type="checkbox" id="pdn_consent" name="pdn_consent" value="1" required>
         <label for="pdn_consent"><?= QUESTIONS.consent_text ?></label>
       </div>
+      <div class="field-error" data-error-for="pdn_consent"></div>
+      <div class="hint consent-note">Форма фиксирует технические параметры заполнения — время и способ ввода. Эти данные не влияют на оценку и используются только для проверки подлинности ответов.</div>
     </section>
 
     <input type="hidden" name="telemetry" id="telemetry">
+    <div class="error" id="form-error" hidden></div>
     <button type="submit" id="submit-btn">Отправить анкету</button>
   </form>
 </div>
+
+<script data-adapter>
+// Отправка для варианта с Apps Script. google.script.run работает на
+// колбэках, поэтому оборачиваем его в промис — общий код ниже ждёт
+// именно промис с { ok, errors }.
+window.submitPayload = function (data) {
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(reject)
+      .submitForm(data);
+  });
+};
+</script>
 
 <script>
 //__JS__

@@ -15,6 +15,8 @@ from app import pipeline
 from app.config import STATUS_DONE, STATUS_MANUAL, STATUS_NEW, STATUS_PROCESSING
 from app.models import ExtractorOutput, OPEN_FIELDS, STOP_FIELDS, ScorerOutput
 
+FULL_SCORES = {"q1": 3, "q2": 3, "q3": 3, "q4": 3, "q5": 3}
+
 
 class FakeSheet:
     """Лист в памяти: 54 колонки, AN считается формулой и должна остаться нетронутой."""
@@ -228,6 +230,29 @@ def test_result_zone_shape(monkeypatch, fixtures):
     assert sheet.get("notified") == "", "notified — заглушка, код её не заполняет"
     assert json.loads(sheet.get("evidence_json"))["q1"] == "цитата q1"
     assert sheet.get("screening_questions").count("\n") == 2, "три вопроса на интервью"
+
+
+def test_telemetry_flag_adds_screening_question(monkeypatch, fixtures):
+    """Вставка не понижает вердикт, а добавляет четвёртый вопрос на интервью.
+
+    Флаг при этом никуда не девается: в таблице он по-прежнему виден и в
+    коде флагов, и в русской строке замечаний.
+    """
+    from app.verdict import TELEMETRY_SCREENING_RU
+
+    fixture = next(f for f in fixtures if f["expected"]["scores"] == FULL_SCORES)
+    sheet = FakeSheet(form_data(fixture), flags="PASTED")
+    install(monkeypatch, sheet)
+    stub_model(monkeypatch, fixture)
+
+    pipeline.process_row(2)
+
+    questions = sheet.get("screening_questions").split("\n")
+    assert len(questions) == 4
+    assert questions[-1] == TELEMETRY_SCREENING_RU
+    assert sheet.get("verdict") == "A", "телеметрия вердикт не понижает"
+    assert "PASTED" in sheet.get("flags")
+    assert "вставленный текст" in sheet.get("flags_ru")
 
 
 def test_form_row_shape(fixtures):

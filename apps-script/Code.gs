@@ -5,6 +5,9 @@
  * SpreadsheetApp — без сервисного аккаунта и без gspread: скрипт привязан к
  * таблице и работает от имени владельца.
  *
+ * doPost принимает анкету и от статической страницы на своём домене
+ * (dist/index.html): она приходит JSON-строкой, ответ ей — тоже JSON.
+ *
  * Порядок колонок, тексты вопросов,CSS и JS телеметрии не пишутся здесь
  * руками: Headers.gs, Questions.gs и Index.html собираются из HEADERS.py,
  * questions.json и templates/form.html скриптом apps-script/build_gs.py.
@@ -13,8 +16,17 @@
  * Колонка AN (total_score) не трогается: там формула таблицы.
  */
 
+// Боевой адрес веб-приложения, тот самый, что раздан кандидатам.
+// Впишите сюда URL развёртывания, оканчивающийся на /exec:
+//   Развернуть → Управление развёртываниями → URL веб-приложения.
+// Пусто — адрес будет запрошен у ScriptApp, но тот возвращает URL
+// последнего развёртывания, а он не обязан совпадать с раздаваемым.
+var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbw0gzVmKXuMQ8zf4_3MTdKxSLCLy1KrJy6kze18GCJtqAVsWpD8d5hkot6VVpqZZDEDXQ/exec';
+
 var SHEET_NAME = 'Данные';
 var HONEYPOT_FIELD = 'company_website';
+// Ключ ошибки, не привязанной к конкретному полю: сбой записи, обрыв связи.
+var FORM_ERROR_KEY = '_form';
 
 // Пороги продублированы из app/config.py. Значения должны совпадать —
 // расхождение означало бы, что одна и та же анкета получает разные флаги
@@ -31,11 +43,30 @@ var TZ_OFFSET_HOURS = 3;
 
 // ============================== doGet =====================================
 
+/**
+ * Адрес веб-приложения. Пустая строка, если узнать его не удалось.
+ *
+ * ScriptApp.getService().getUrl() возвращает URL последнего развёртывания
+ * и может бросить исключение при нехватке прав, поэтому он лишь запасной
+ * источник, а обращение к нему обёрнуто в try.
+ */
+function webAppUrl() {
+  if (WEB_APP_URL) return WEB_APP_URL;
+  try {
+    return ScriptApp.getService().getUrl() || '';
+  } catch (err) {
+    Logger.log('не удалось получить адрес веб-приложения: ' + err);
+    return '';
+  }
+}
+
 function doGet() {
   var t = HtmlService.createTemplateFromFile('Index');
   t.QUESTIONS = QUESTIONS;
   t.honeypot = HONEYPOT_FIELD;
-  t.formUrl = ScriptApp.getService().getUrl();
+  // Тот же адрес идёт в action формы: без него обычная отправка при
+  // отключённом JavaScript никуда не уйдёт.
+  t.formUrl = webAppUrl();
   return t.evaluate()
     .setTitle(QUESTIONS.title)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
@@ -44,20 +75,29 @@ function doGet() {
 
 // ============================== doPost ====================================
 
-function doPost(e) {
-  var params = (e && e.parameter) || {};
+/**
+ * Проверка и запись анкеты. Общая точка для всех трёх способов отправки:
+ * google.script.run из формы на Apps Script, JSON-запрос со статической
+ * страницы и обычный POST без JavaScript — см. doPost.
+ *
+ * Возвращает { ok: true } либо { ok: false, errors: {поле: текст} }.
+ * Ключ FORM_ERROR_KEY используется для ошибок, не привязанных к полю —
+ * форма показывает их полосой над кнопкой отправки.
+ */
+function submitForm(payload) {
+  var params = payload || {};
 
   // Приманка для ботов: поле скрыто стилями, человек его не видит.
   // Заполнено — отвечаем как обычно, но строку в таблице не занимаем.
   if (String(params[HONEYPOT_FIELD] || '').trim() !== '') {
     Logger.log('honeypot сработал — анкета не записана');
-    return renderThanks();
+    return { ok: true };
   }
 
   var parsed = validate(params);
-  if (parsed.errors.length) {
-    Logger.log('анкета не прошла валидацию: ' + parsed.errors.join('; '));
-    return renderError(parsed.errors.join('; '));
+  if (!parsed.ok) {
+    Logger.log('анкета не прошла валидацию: ' + JSON.stringify(parsed.errors));
+    return { ok: false, errors: parsed.errors };
   }
 
   var telemetry = parseTelemetry(params.telemetry);
@@ -73,11 +113,80 @@ function doPost(e) {
     writeSubmission(parsed.data, telemetry, flags);
   } catch (err) {
     Logger.log('не удалось записать анкету: ' + err);
-    return renderError(
-      'Не удалось сохранить анкету. Попробуйте отправить ещё раз через минуту.'
-    );
+    var errors = {};
+    errors[FORM_ERROR_KEY] =
+      'Не удалось сохранить анкету. Попробуйте отправить ещё раз через минуту.';
+    return { ok: false, errors: errors };
   }
-  return renderThanks();
+  return { ok: true };
+}
+
+/**
+ * Разбор тела POST. Возвращает { params, json }.
+ *
+ * Статическая страница на своём домене (dist/index.html) шлёт анкету
+ * JSON-строкой с Content-Type: text/plain. Тип выбран не для красоты: с
+ * любым другим браузер сначала сделает preflight-запрос OPTIONS, а
+ * Apps Script на него не отвечает и заголовков CORS не выдаёт — отправка
+ * умерла бы, не начавшись. Поля такого запроса в e.parameter не попадают,
+ * их видно только в e.postData.contents.
+ *
+ * Обычная отправка формы (запасной путь без JavaScript) по-прежнему
+ * приходит как urlencoded, и её поля разобраны в e.parameter — этот путь
+ * остаётся запасным и трогать его незачем.
+ */
+function parseBody(e) {
+  var raw = e && e.postData && e.postData.contents;
+  if (raw) {
+    try {
+      var parsed = JSON.parse(raw);
+      // Тело urlencoded тоже лежит в contents, и «123» разобралось бы в
+      // число. Анкета — всегда объект, остальное отдаём запасному пути.
+      if (parsed && typeof parsed === 'object' && !(parsed instanceof Array)) {
+        return { params: parsed, json: true };
+      }
+    } catch (err) {
+      // Не JSON — значит обычная отправка формы. Это не ошибка.
+    }
+  }
+  return { params: (e && e.parameter) || {}, json: false };
+}
+
+/**
+ * Приём анкеты обычным POST.
+ *
+ * Два вызывающих, и отвечать им надо по-разному. Статическая страница ждёт
+ * JSON { ok, errors } и рисует ошибки под полями сама. У формы без
+ * JavaScript показывать результат на месте некому, поэтому ей уходит
+ * HTML-страница. Проверки при этом одни и те же — см. submitForm.
+ */
+function doPost(e) {
+  var body = parseBody(e);
+  var result = submitForm(body.params);
+
+  if (body.json) {
+    return jsonResponse(result);
+  }
+  if (result.ok) {
+    return renderThanks();
+  }
+  return renderError(joinErrors(result.errors));
+}
+
+/** Ответ статической странице: то же самое, что вернул бы submitForm. */
+function jsonResponse(result) {
+  return ContentService
+    .createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/** Ошибки по полям — в одну строку, для страницы без формы. */
+function joinErrors(errors) {
+  var out = [];
+  for (var key in errors) {
+    if (errors.hasOwnProperty(key)) out.push(errors[key]);
+  }
+  return out.join('; ');
 }
 
 // =========================== Валидация ====================================
@@ -85,22 +194,39 @@ function doPost(e) {
 var TELEGRAM_RE = /^@?[A-Za-z0-9_]{4,32}$/;
 var URL_RE = /^https?:\/\/\S+\.\S+/i;
 
+/**
+ * Схлопывает пробелы и переносы. Длина меряется именно после этого —
+ * в браузере счётчик под полем считает так же, иначе кандидат видел бы
+ * «80/80», а сервер отвечал бы «слишком короткий».
+ */
+function normalize(text) {
+  return String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Серверная валидация. Последний рубеж: форма проверяет то же самое до
+ * отправки, но запрос может прийти и в обход неё.
+ *
+ * Возвращает { ok, errors, data }, где errors — объект «имя поля → текст».
+ * Форма раскладывает эти тексты под соответствующими полями; doPost, у
+ * которого полей нет, склеивает их в одну строку.
+ */
 function validate(params) {
-  var errors = [];
+  var errors = {};
   var data = {};
 
-  var fio = String(params.fio || '').replace(/\s+/g, ' ').trim();
+  var fio = normalize(params.fio);
   if (fio.length < 5 || fio.split(' ').length < 2) {
-    errors.push('Укажите фамилию и имя полностью');
+    errors.fio = 'Укажите фамилию и имя полностью';
   } else if (fio.length > 200) {
-    errors.push('Слишком длинное ФИО');
+    errors.fio = 'Слишком длинное ФИО';
   }
   data.fio = fio;
 
   var tg = String(params.telegram || '').trim()
     .replace(/^(https?:\/\/)?(t\.me|telegram\.me)\//i, '');
   if (!TELEGRAM_RE.test(tg)) {
-    errors.push('Telegram укажите в виде @username');
+    errors.telegram = 'Telegram укажите в виде @username';
     data.telegram = tg;
   } else {
     data.telegram = '@' + tg.replace(/^@/, '');
@@ -108,54 +234,56 @@ function validate(params) {
 
   var url = String(params.resume_url || '').trim();
   if (!URL_RE.test(url)) {
-    errors.push('Ссылка на резюме должна начинаться с http:// или https://');
+    errors.resume_url = 'Ссылка на резюме должна начинаться с http:// или https://';
   } else if (url.length > 2000) {
-    errors.push('Слишком длинная ссылка');
+    errors.resume_url = 'Слишком длинная ссылка';
   }
   data.resume_url = url;
 
   data.pdn_consent = String(params.pdn_consent || '') !== '';
   if (!data.pdn_consent) {
-    errors.push('Без согласия на обработку персональных данных анкету не принять');
+    errors.pdn_consent =
+      'Без согласия на обработку персональных данных анкету не принять';
   }
 
   data.stops = {};
-  var missingStop = false;
   for (var i = 0; i < QUESTIONS.stop_questions.length; i++) {
     var field = QUESTIONS.stop_questions[i].field;
     var value = String(params[field] || '').trim();
     if (value !== 'Да' && value !== 'Нет') {
-      missingStop = true;
+      errors[field] = 'Выберите «Да» или «Нет»';
     }
     data.stops[field] = value;
-  }
-  if (missingStop) {
-    errors.push('Ответьте на все вопросы об условиях работы');
   }
 
   data.answers = {};
   for (var j = 0; j < QUESTIONS.open_questions.length; j++) {
     var oq = QUESTIONS.open_questions[j];
-    var text = String(params[oq.field] || '').replace(/\s+/g, ' ').trim();
+    var text = normalize(params[oq.field]);
     data.answers[oq.field] = text;
 
     if (!text) {
-      errors.push('Не заполнен ' + oq.label.toLowerCase());
+      errors[oq.field] = 'Ответьте на этот вопрос';
       continue;
     }
     var min = oq.min_length || 0;
     if (text.length < min) {
-      errors.push(
-        oq.label + ': ответ слишком короткий (' + text.length +
-        ' из ' + min + ' знаков минимум)'
-      );
-    }
-    if (oq.max_length && text.length > oq.max_length) {
-      errors.push(oq.label + ': не больше ' + oq.max_length + ' знаков');
+      errors[oq.field] =
+        'Ответ слишком короткий: ' + text.length + ' из ' + min +
+        ' знаков минимум';
+    } else if (oq.max_length && text.length > oq.max_length) {
+      errors[oq.field] = 'Не больше ' + oq.max_length + ' знаков';
     }
   }
 
-  return { data: data, errors: errors };
+  return { ok: !hasKeys(errors), errors: errors, data: data };
+}
+
+function hasKeys(obj) {
+  for (var key in obj) {
+    if (obj.hasOwnProperty(key)) return true;
+  }
+  return false;
 }
 
 // =========================== Телеметрия ===================================
@@ -371,11 +499,24 @@ function renderThanks() {
 }
 
 function renderError(message) {
+  // history.back() отсюда не работает: Apps Script рендерит приложение в
+  // изолированном iframe, и назад отматывается история самого iframe.
+  // Нужна прямая ссылка, обязательно с target="_top" — без него страница
+  // откроется внутри того же iframe.
+  var url = webAppUrl();
+
+  // Адрес неизвестен — обходимся текстом. Страница ошибки обязана
+  // отрисоваться при любых обстоятельствах: она и так последнее, что
+  // видит кандидат.
+  var back = url
+    ? '<p><a href="' + escapeHtml(url) + '" target="_top">Открыть анкету заново</a></p>'
+    : '<p>Вернитесь на страницу анкеты и заполните заново</p>';
+
   return page(
     'Проверьте анкету',
     '<h1>Анкета не отправлена</h1>' +
     '<p class="err">' + escapeHtml(message) + '</p>' +
-    '<p><a href="javascript:history.back()">Вернуться и исправить</a></p>'
+    back
   );
 }
 
@@ -431,6 +572,6 @@ function checkSetup() {
     Logger.log('шапка листа совпадает с HEADERS (' + HEADERS.length + ' колонок)');
   }
   Logger.log('следующая свободная строка: ' + allocateRow(sheet));
-  Logger.log('адрес формы: ' + ScriptApp.getService().getUrl());
+  Logger.log('адрес формы: ' + (webAppUrl() || 'НЕИЗВЕСТЕН — впишите WEB_APP_URL'));
   return problems.length === 0;
 }

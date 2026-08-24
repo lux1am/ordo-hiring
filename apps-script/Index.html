@@ -67,6 +67,17 @@
   }
   textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
   .counter { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .counter.ok { color: #15803d; }
+  .field-error {
+    font-size: 14px;
+    color: var(--error-text);
+    margin-top: 6px;
+  }
+  .field-error:empty { display: none; }
+  .success { text-align: center; }
+  .success h2 { font-size: 20px; margin: 0 0 10px; font-weight: 650; }
+  .success p { color: var(--muted); margin: 0 0 8px; }
+  .success p:last-child { margin-bottom: 0; }
   .q-text { font-weight: 400; color: var(--text); margin-bottom: 10px; }
   .q-num { font-weight: 650; display: block; margin-bottom: 4px; }
   .radio-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
@@ -94,6 +105,8 @@
   .consent { display: flex; gap: 10px; align-items: flex-start; }
   .consent input { margin-top: 4px; width: 18px; height: 18px; flex-shrink: 0; }
   .consent label { font-weight: 400; margin: 0; }
+  /* Отступ слева выравнивает примечание с текстом согласия, а не с чекбоксом. */
+  .consent-note { margin: 10px 0 0 28px; }
   button {
     width: 100%;
     padding: 14px;
@@ -136,7 +149,7 @@
     <p class="intro"><?= QUESTIONS.intro ?></p>
   </header>
 
-  <form method="post" action="<?= formUrl ?>" id="form" novalidate>
+  <form method="post" action="<?= formUrl ?>" id="form">
     <div class="hp" aria-hidden="true">
       <label for="<?= honeypot ?>">Не заполняйте это поле</label>
       <input type="text" id="<?= honeypot ?>" name="<?= honeypot ?>" tabindex="-1" autocomplete="off">
@@ -145,18 +158,26 @@
     <section>
       <h2>О себе</h2>
       <div class="field">
-        <label for="fio">Фамилия, имя и отчество</label>
-        <input type="text" id="fio" name="fio" autocomplete="name" required>
+        <label for="fio">Фамилия, имя, отчество (при наличии)</label>
+        <input type="text" id="fio" name="fio" autocomplete="name" required
+          minlength="5" maxlength="200" pattern="\S+\s+\S+.*"
+          title="Укажите имя и фамилию через пробел">
+        <div class="field-error" data-error-for="fio"></div>
       </div>
       <div class="field">
         <label for="telegram">Telegram</label>
         <div class="hint">Например, @username</div>
-        <input type="text" id="telegram" name="telegram" autocomplete="off" required>
+        <input type="text" id="telegram" name="telegram" autocomplete="off" required
+          pattern="\s*(?:https?://)?(?:t\.me/)?@?[A-Za-z0-9_]{4,32}\s*"
+          title="Например: @username или t.me/username">
+        <div class="field-error" data-error-for="telegram"></div>
       </div>
       <div class="field">
-        <label for="resume_url">Ссылка на резюме</label>
+        <label for="resume_url">Ссылка на резюме или профиль на площадке</label>
         <div class="hint">hh.ru, LinkedIn, Google Docs или любая открытая ссылка</div>
-        <input type="url" id="resume_url" name="resume_url" required>
+        <input type="url" id="resume_url" name="resume_url" required maxlength="2000"
+          title="Ссылка должна начинаться с http:// или https://">
+        <div class="field-error" data-error-for="resume_url"></div>
       </div>
     </section>
 
@@ -167,13 +188,18 @@
       <div class="stop-q">
         <div class="q-text"><?= sq.text ?></div>
         <div class="radio-row">
+          <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+               роль кнопки играет label. Нативная валидация на скрытом поле
+               может заблокировать отправку, не показав сообщения. Ответ
+               проверяет сервер — см. validate() в Code.gs. -->
           <label>
-            <input type="radio" name="<?= sq.field ?>" value="Да" required><span>Да</span>
+            <input type="radio" name="<?= sq.field ?>" value="Да"><span>Да</span>
           </label>
           <label>
-            <input type="radio" name="<?= sq.field ?>" value="Нет" required><span>Нет</span>
+            <input type="radio" name="<?= sq.field ?>" value="Нет"><span>Нет</span>
           </label>
         </div>
+        <div class="field-error" data-error-for="<?= sq.field ?>"></div>
       </div>
       <? } ?>
     </section>
@@ -186,9 +212,11 @@
         <span class="q-num"><?= oq.label ?></span>
         <div class="q-text"><?= oq.text ?></div>
         <textarea id="<?= oq.field ?>" name="<?= oq.field ?>" data-telemetry="<?= oq.field ?>"
+          data-min="<?= oq.min_length || 0 ?>"
           <? if (oq.max_length) { ?>maxlength="<?= oq.max_length ?>"<? } ?>
           required></textarea>
         <div class="counter" data-counter-for="<?= oq.field ?>"></div>
+        <div class="field-error" data-error-for="<?= oq.field ?>"></div>
       </div>
       <? } ?>
     </section>
@@ -198,12 +226,29 @@
         <input type="checkbox" id="pdn_consent" name="pdn_consent" value="1" required>
         <label for="pdn_consent"><?= QUESTIONS.consent_text ?></label>
       </div>
+      <div class="field-error" data-error-for="pdn_consent"></div>
+      <div class="hint consent-note">Форма фиксирует технические параметры заполнения — время и способ ввода. Эти данные не влияют на оценку и используются только для проверки подлинности ответов.</div>
     </section>
 
     <input type="hidden" name="telemetry" id="telemetry">
+    <div class="error" id="form-error" hidden></div>
     <button type="submit" id="submit-btn">Отправить анкету</button>
   </form>
 </div>
+
+<script data-adapter>
+// Отправка для варианта с Apps Script. google.script.run работает на
+// колбэках, поэтому оборачиваем его в промис — общий код ниже ждёт
+// именно промис с { ok, errors }.
+window.submitPayload = function (data) {
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(reject)
+      .submitForm(data);
+  });
+};
+</script>
 
 <script>
 (function () {
@@ -215,6 +260,42 @@
   // браузеров срабатывал бы почти на всех.
   var isMobile = (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
                  /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+  // Сервер меряет длину ответа после схлопывания пробелов. Счётчик под
+  // полем обязан считать так же, иначе кандидат видел бы одно, а получал
+  // отказ по другому.
+  function normalize(text) {
+    return String(text == null ? "" : text).replace(/\s+/g, " ").trim();
+  }
+
+  // Русские окончания: «остался 1 знак», «осталось 2 знака», «осталось 5 знаков».
+  function pluralRu(n, one, few, many) {
+    var mod10 = n % 10, mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return one;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+    return many;
+  }
+
+  function chars(n) {
+    return n + " " + pluralRu(n, "знак", "знака", "знаков");
+  }
+
+  function capitalize(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  // Счётчик показывает требование, а не прогресс: пока поле пустое — сколько
+  // нужно, дальше — сколько осталось, после порога — что минимум взят.
+  function counterText(length, min) {
+    if (length >= min) return "минимум набран";
+    if (length === 0) return "минимум " + chars(min);
+    return pluralRu(min - length, "остался", "осталось", "осталось") +
+      " " + chars(min - length);
+  }
+
+  var REQUIRED_TEXT = "Заполните это поле";
+  var CONSENT_REQUIRED_TEXT = "Отметьте согласие — без него анкету не отправить";
+  var FORMAT_TEXT = "Проверьте формат";
 
   var PAUSE_MS = 5000;   // пауза дольше пяти секунд не считается временем набора
   var startedAt = Date.now();
@@ -242,12 +323,24 @@
     var s = statsFor(name);
     var counter = document.querySelector('[data-counter-for="' + name + '"]');
 
+    var min = parseInt(el.getAttribute("data-min"), 10) || 0;
+
+    // Счётчик и проверка длины идут по нормализованной строке — ровно так
+    // же, как считает сервер. Иначе ответ из 80 знаков с двойными пробелами
+    // показывал бы «минимум набран» и всё равно отклонялся.
     function renderCounter() {
-      if (!counter) return;
-      var max = el.getAttribute("maxlength");
-      counter.textContent = max
-        ? el.value.length + " из " + max + " знаков"
-        : el.value.length + " знаков";
+      var length = normalize(el.value).length;
+      if (counter) {
+        counter.textContent = min ? counterText(length, min) : "";
+        counter.className = length >= min ? "counter ok" : "counter";
+      }
+      // Пустому полю про минимум говорить рано — это обычное «не заполнено».
+      // Проверка идёт раньше сравнения с min: при min = 0 пустое поле иначе
+      // осталось бы без своего текста, и браузер показал бы английский.
+      el.setCustomValidity(
+        length === 0 ? (el.required ? REQUIRED_TEXT : "") :
+        length >= min ? "" : capitalize(counterText(length, min))
+      );
     }
     renderCounter();
 
@@ -278,6 +371,11 @@
       s.length = el.value.length;
       renderCounter();
     });
+
+    el.addEventListener("input", function () {
+      var box = document.querySelector('[data-error-for="' + name + '"]');
+      if (box) box.textContent = "";
+    });
   });
 
   document.addEventListener("visibilitychange", function () {
@@ -295,7 +393,86 @@
     }
   });
 
-  document.getElementById("form").addEventListener("submit", function () {
+  // ------------------------- Отправка ------------------------------------
+
+  var form = document.getElementById("form");
+  var btn = document.getElementById("submit-btn");
+  var formError = document.getElementById("form-error");
+
+  var RADIO_REQUIRED_TEXT = "Выберите «Да» или «Нет»";
+
+  function radioGroups() {
+    var groups = {};
+    var inputs = form.querySelectorAll('input[type="radio"][name]');
+    Array.prototype.forEach.call(inputs, function (el) {
+      (groups[el.name] = groups[el.name] || []).push(el);
+    });
+    return groups;
+  }
+
+  // Радиогруппы проверяются своим кодом, а не атрибутом required: сами
+  // input скрыты стилями (роль кнопки играет label), и нативная валидация
+  // на скрытом поле способна заблокировать отправку, не показав сообщения.
+  // Тот же ответ проверяет и сервер — это вторая линия, не замена.
+  function validateRadioGroups() {
+    var errors = {};
+    var groups = radioGroups();
+    Object.keys(groups).forEach(function (name) {
+      var chosen = groups[name].some(function (el) { return el.checked; });
+      if (!chosen) errors[name] = RADIO_REQUIRED_TEXT;
+    });
+    return errors;
+  }
+
+  // Ошибка под группой гаснет, как только выбран вариант.
+  Object.keys(radioGroups()).forEach(function (name) {
+    radioGroups()[name].forEach(function (el) {
+      el.addEventListener("change", function () {
+        var box = document.querySelector('[data-error-for="' + name + '"]');
+        if (box) box.textContent = "";
+      });
+    });
+  });
+
+  // ------------------ нативные подсказки по-русски -----------------------
+  // Язык встроенных сообщений задаёт браузер кандидата, а не страница: в
+  // русской анкете всплыло бы «Please fill out this field». Поэтому текст
+  // каждого состояния задаётся здесь через setCustomValidity, а формат поля
+  // описывает его же title — он точнее любой общей фразы.
+  function validationText(el) {
+    var v = el.validity;
+    if (v.valid) return "";
+    if (v.valueMissing) {
+      return el.type === "checkbox" ? CONSENT_REQUIRED_TEXT : REQUIRED_TEXT;
+    }
+    if (v.tooShort) return "Слишком коротко: нужно хотя бы " + chars(el.minLength);
+    if (v.tooLong) return "Слишком длинно: не больше " + chars(el.maxLength);
+    return (el.getAttribute("title") || "").trim() || FORMAT_TEXT;
+  }
+
+  // Сообщение пересобирается на каждый ввод: пустое setCustomValidity
+  // возвращает полю нативные проверки, и validity читается уже по ним.
+  // Читать validity можно свободно — в отличие от checkValidity(), событие
+  // invalid она не шлёт, так что рекурсии здесь нет.
+  function refreshValidity(el) {
+    el.setCustomValidity("");
+    var text = validationText(el);
+    if (text) el.setCustomValidity(text);
+  }
+
+  Array.prototype.forEach.call(
+    form.querySelectorAll("input, textarea, select"),
+    function (el) {
+      // У textarea своё сообщение — про минимальную длину, см. renderCounter.
+      if (el.hasAttribute("data-telemetry") || el.type === "hidden") return;
+      var refresh = function () { refreshValidity(el); };
+      el.addEventListener("input", refresh);
+      el.addEventListener("change", refresh);
+      refresh();
+    }
+  );
+
+  function fillTelemetry() {
     var fields = {};
     Object.keys(stats).forEach(function (name) {
       var s = stats[name];
@@ -315,10 +492,106 @@
       total_time_sec: Math.round((Date.now() - startedAt) / 1000),
       fields: fields
     });
+  }
 
-    var btn = document.getElementById("submit-btn");
-    btn.disabled = true;
-    btn.textContent = "Отправляем…";
+  function collectPayload() {
+    var data = {};
+    var fd = new FormData(form);
+    fd.forEach(function (value, key) { data[key] = value; });
+    return data;
+  }
+
+  function clearErrors() {
+    var boxes = document.querySelectorAll("[data-error-for]");
+    Array.prototype.forEach.call(boxes, function (box) { box.textContent = ""; });
+    formError.textContent = "";
+    formError.hidden = true;
+  }
+
+  function showErrors(errors) {
+    var first = null;
+    var loose = [];
+    Object.keys(errors || {}).forEach(function (key) {
+      var box = document.querySelector('[data-error-for="' + key + '"]');
+      if (box) {
+        box.textContent = errors[key];
+        if (!first) first = box;
+      } else {
+        // Ошибки без своего поля — сбой записи, обрыв связи — идут полосой.
+        loose.push(errors[key]);
+      }
+    });
+    if (loose.length) {
+      formError.textContent = loose.join(" ");
+      formError.hidden = false;
+      if (!first) first = formError;
+    }
+    if (first && first.scrollIntoView) {
+      first.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+
+  function showSuccess() {
+    var card = document.createElement("section");
+    card.className = "success";
+    card.innerHTML =
+      "<h2>Спасибо, анкета отправлена</h2>" +
+      "<p>Мы изучим ваши ответы и свяжемся с вами в Telegram.</p>" +
+      "<p>Отправлять анкету повторно не нужно.</p>";
+    form.parentNode.replaceChild(card, form);
+    card.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  function setBusy(busy) {
+    btn.disabled = busy;
+    btn.textContent = busy ? "Отправляем…" : "Отправить анкету";
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    clearErrors();
+
+    // Стоп-вопросы проверяются первыми: их браузер не проверит сам.
+    var radioErrors = validateRadioGroups();
+    if (Object.keys(radioErrors).length) {
+      showErrors(radioErrors);
+      return;
+    }
+
+    // Остальное показывает сам браузер: незаполненные поля по required,
+    // слишком короткие ответы — по setCustomValidity выше.
+    if (!form.reportValidity()) return;
+
+    fillTelemetry();
+    setBusy(true);
+
+    var done = function (res) {
+      if (res && res.ok) {
+        showSuccess();
+        return;
+      }
+      setBusy(false);
+      showErrors((res && res.errors) || {});
+    };
+
+    var failed = function (err) {
+      setBusy(false);
+      var errors = {};
+      errors._form =
+        "Не удалось отправить анкету: " +
+        ((err && err.message) || "нет связи с сервером") +
+        ". Введённое сохранено, попробуйте ещё раз.";
+      showErrors(errors);
+    };
+
+    try {
+      // Каждый вариант формы определяет свой submitPayload: в Apps Script
+      // это google.script.run, в FastAPI — fetch. Всё остальное — разметка
+      // ошибок, блокировка кнопки, экран успеха — общее.
+      window.submitPayload(collectPayload()).then(done, failed);
+    } catch (err) {
+      failed(err);
+    }
   });
 })();
 </script>

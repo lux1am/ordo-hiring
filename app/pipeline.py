@@ -21,7 +21,7 @@ from app.extractor import extract
 from app.models import OPEN_FIELDS, STOP_FIELDS, QKEYS, Submission
 from app.recovery import mark_claimed, mark_released
 from app.scorer import ScoringFailed, score
-from app.verdict import decide
+from app.verdict import decide, screening_additions
 
 log = logging.getLogger(__name__)
 
@@ -219,6 +219,8 @@ def _process(row: int) -> str:
     scores = [result.scores[k] for k in QKEYS]
     is_manual = bool(manual_reasons)
     reasons = v.reasons + zeroed + manual_reasons
+    # Телеметрия не понижает вердикт, а даёт четвёртый вопрос на интервью.
+    screening = result.screening_questions + screening_additions(flags)
 
     # Ручная проверка показывает B, чтобы витрина не была пустой. Исключение —
     # жёсткий C по автофильтру Q3: он объявлен безусловным, и подмена его на B
@@ -233,7 +235,7 @@ def _process(row: int) -> str:
             ai_style=result.ai_style,
             ai_markers=result.ai_markers,
             evidence=result.evidence,
-            screening=result.screening_questions,
+            screening=screening,
             flags=flags,
             verdict=verdict_out,
             status=STATUS_MANUAL if is_manual else STATUS_DONE,

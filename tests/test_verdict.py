@@ -1,5 +1,5 @@
 """Пороги, понижения и автофильтры."""
-from app.verdict import decide
+from app.verdict import TELEMETRY_SCREENING_RU, decide, screening_additions
 
 FULL = {"q1": 3, "q2": 3, "q3": 3, "q4": 3, "q5": 3}
 
@@ -37,7 +37,7 @@ def test_thresholds():
 
 
 def test_downgrade_a_to_b():
-    for flags, style in ([["PASTED"], 0], [["MATH"], 0], [[], 71]):
+    for flags, style in ([["MATH"], 0], [[], 71]):
         assert decide(FULL, flags, style, True).verdict == "B", (flags, style)
 
 
@@ -53,9 +53,32 @@ def test_ai_style_boundary():
 
 
 def test_other_flags_do_not_downgrade():
-    """Понижают только PASTED, MATH и высокий ai_style."""
-    for flag in ("SUSPICIOUS", "TAB_SWITCH", "OUTLIER", "NO_NUMBERS", "MOBILE"):
+    """Понижают только MATH и высокий ai_style."""
+    for flag in ("PASTED", "SUSPICIOUS", "TAB_SWITCH", "OUTLIER", "NO_NUMBERS", "MOBILE"):
         assert decide(FULL, [flag], 0, True).verdict == "A", flag
+
+
+def test_telemetry_never_downgrades():
+    """Как заполняли — не оценка. Даже все три флага сразу оставляют A."""
+    v = decide(FULL, ["PASTED", "SUSPICIOUS", "TAB_SWITCH"], 0, True)
+    assert v.verdict == "A"
+    assert v.reasons == [], "понижения не было — писать в причины нечего"
+
+
+def test_telemetry_adds_screening_question():
+    """Вместо понижения — вопрос на интервью, по одному разу на анкету."""
+    for flag in ("PASTED", "SUSPICIOUS", "TAB_SWITCH"):
+        assert screening_additions([flag]) == [TELEMETRY_SCREENING_RU], flag
+
+    assert screening_additions(["PASTED", "SUSPICIOUS", "TAB_SWITCH"]) == [
+        TELEMETRY_SCREENING_RU
+    ], "три флага не должны давать три одинаковых вопроса"
+
+
+def test_non_telemetry_flags_add_nothing():
+    for flag in ("MATH", "OUTLIER", "NO_NUMBERS", "MOBILE"):
+        assert screening_additions([flag]) == [], flag
+    assert screening_additions([]) == []
 
 
 def test_q3_autofilter_overrides_everything():

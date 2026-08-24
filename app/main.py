@@ -13,7 +13,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
@@ -77,16 +77,60 @@ def form(request: Request):
     )
 
 
-def _render_error(request: Request, message: str, data: dict, code: int = 400):
+FORM_ERROR_KEY = "_form"
+
+
+def _wants_json(request: Request) -> bool:
+    """Форма отправляет анкету через fetch и ждёт JSON.
+
+    Обычный POST — путь для случая, когда JavaScript отключён или упал:
+    тогда показывать результат на месте формы некому, и ответом идёт
+    страница. То же разделение, что у doPost в Apps Script.
+    """
+    return "application/json" in request.headers.get("accept", "")
+
+
+def _errors_by_field(exc: ValidationError) -> dict[str, str]:
+    """Ошибки pydantic — в словарь «имя поля → текст».
+
+    Проверки отдельных полей дают имя в loc, проверки анкеты целиком — нет;
+    последние собираются под общим ключом и показываются полосой.
+    """
+    errors: dict[str, str] = {}
+    loose: list[str] = []
+    for err in exc.errors():
+        message = err["msg"].replace("Value error, ", "")
+        field = str(err["loc"][0]) if err["loc"] else ""
+        if field and field not in {"stops", "answers", "telemetry"}:
+            errors.setdefault(field, message)
+        else:
+            loose.append(message)
+    if loose:
+        errors[FORM_ERROR_KEY] = "; ".join(loose)
+    return errors
+
+
+def _render_error(
+    request: Request, errors: dict[str, str], data: dict, code: int = 400
+):
+    if _wants_json(request):
+        return JSONResponse({"ok": False, "errors": errors}, status_code=code)
     return templates.TemplateResponse(
         request=request,
         name="form.html",
-        context={"q": load_questions(), "honeypot": HONEYPOT_FIELD, "error": message, "data": data},
+        context={
+            "q": load_questions(),
+            "honeypot": HONEYPOT_FIELD,
+            "error": "; ".join(errors.values()),
+            "data": data,
+        },
         status_code=code,
     )
 
 
 def _thanks(request: Request):
+    if _wants_json(request):
+        return JSONResponse({"ok": True})
     return templates.TemplateResponse(request=request, name="thanks.html", context={})
 
 
@@ -104,7 +148,8 @@ async def submit(request: Request, background: BackgroundTasks):
     if not ratelimit.allow(ip):
         return _render_error(
             request,
-            "С вашего адреса отправлено слишком много анкет. Попробуйте через час.",
+            {FORM_ERROR_KEY: "С вашего адреса отправлено слишком много анкет. "
+                             "Попробуйте через час."},
             raw,
             code=429,
         )
@@ -126,9 +171,9 @@ async def submit(request: Request, background: BackgroundTasks):
             telemetry=telemetry,
         )
     except ValidationError as e:
-        message = "; ".join(err["msg"].replace("Value error, ", "") for err in e.errors())
-        log.info("анкета не прошла валидацию: %s", message)
-        return _render_error(request, message, raw)
+        errors = _errors_by_field(e)
+        log.info("анкета не прошла валидацию: %s", errors)
+        return _render_error(request, errors, raw)
 
     submission_id = new_id()
     flags = telemetry_flags(sub)
@@ -168,7 +213,8 @@ async def submit(request: Request, background: BackgroundTasks):
         log.exception("анкета %s: не удалось записать в таблицу", submission_id)
         return _render_error(
             request,
-            "Не удалось сохранить анкету. Попробуйте отправить ещё раз через минуту.",
+            {FORM_ERROR_KEY: "Не удалось сохранить анкету. "
+                             "Попробуйте отправить ещё раз через минуту."},
             raw,
             code=500,
         )

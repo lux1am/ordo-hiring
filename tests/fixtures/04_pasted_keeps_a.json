@@ -1,5 +1,5 @@
 {
-  "name": "Сильные ответы, но вставлены из буфера — A понижается до B",
+  "name": "Сильные ответы вставлены из буфера — A остаётся, вопрос уходит на интервью",
   "stops": {
     "stop_1_oklad": "Да", "stop_2_komissiya": "Да", "stop_3_kasaniya": "Да",
     "stop_4_vstrechi": "Да", "stop_5_vedenie": "Да", "stop_6_crm": "Да"
@@ -33,6 +33,6 @@
   "ai_style": 30,
   "expected": {
     "scores": {"q1": 3, "q2": 3, "q3": 3, "q4": 3, "q5": 3},
-    "total": 15, "verdict": "B", "status": "done", "flags": ["PASTED"]
+    "total": 15, "verdict": "A", "status": "done", "flags": ["PASTED"]
   }
 }
