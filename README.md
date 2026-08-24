@@ -47,10 +47,20 @@ Apps Script модули `app/main.py` и `app/ratelimit.py` не использ
 Адрес веб-приложения Apps Script кандидату показывать необязательно.
 `npm run build` собирает из того же `templates/form.html` самодостаточную
 страницу `dist/index.html` — с подставленными при сборке вопросами, без
-единого внешнего запроса. Её кладут на свой домен, а анкету она отправляет
+единого внешнего запроса. Она живёт на своём домене, а анкету отправляет
 запросом в то же веб-приложение и показывает ответ на месте, без
 перезагрузки. Что для этого должно быть настроено и почему запрос уходит с
 `Content-Type: text/plain` — в [dist/README.md](dist/README.md).
+
+Домен — **hr.aiordo.ru**, публикация автоматическая: при пуше в `main`
+workflow [pages.yml](.github/workflows/pages.yml) пересобирает страницу и
+выкладывает `dist/` на GitHub Pages. Один раз это нужно включить:
+**Settings → Pages → Source: GitHub Actions** (не «Deploy from a branch») —
+без этого прогон падает на `actions/configure-pages`. Домен хранится в
+`dist/CNAME`, и файл этот **генерируется сборкой**: Pages выкладывает
+артефакт целиком, поэтому положенный руками CNAME пропал бы при первом же
+деплое вместе с доменом. Остальное — DNS, сертификат, ручной запуск — в
+[dist/README.md](dist/README.md).
 
 ## Что происходит с анкетой
 
@@ -178,6 +188,19 @@ Render не переживает рестарт, а логи остаются, �
 запрос после сна идёт около полминуты. Для формы это терпимо. Что важнее:
 засыпание убивает фоновую обработку на полпути — от этого защищает
 восстановление зависших строк, описанное ниже.
+
+## Публикация формы: GitHub Actions
+
+Статическая страница выкладывается на GitHub Pages автоматически —
+[.github/workflows/pages.yml](.github/workflows/pages.yml), при каждом пуше
+в `main`. Шаги: `npm ci`, `npm run build`, `actions/upload-pages-artifact`
+с папкой `dist`, `actions/deploy-pages`. Права прогона — `pages: write` и
+`id-token: write` (второе нужно deploy-pages для OIDC), запись в
+репозиторий ему не требуется.
+
+Перед первым прогоном включите Pages: **Settings → Pages → Source: GitHub
+Actions**. Подробности про домен `hr.aiordo.ru`, DNS и HTTPS — в
+[dist/README.md](dist/README.md).
 
 ## Запуск обработки: GitHub Actions
 

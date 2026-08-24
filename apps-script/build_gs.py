@@ -11,6 +11,7 @@
       + templates/apps-script-index.html — заготовка разметки
     templates/form.html  -> dist/index.html          (страница целиком)
       + templates/static-adapter.js — отправка на своём домене
+    CUSTOM_DOMAIN        -> dist/CNAME                (свой домен для Pages)
 
 Заготовка лежит в templates/, а не рядом с результатом: всё, что попадает
 в apps-script/, clasp считает частью проекта, и файл с плейсхолдерами
@@ -297,11 +298,24 @@ def build_static() -> str:
     return html + "\n"
 
 
+# Свой домен для GitHub Pages. Файл обязан лежать в самой публикуемой папке
+# и собираться вместе с ней: Pages разворачивает артефакт целиком, и всё,
+# чего в артефакте нет, при деплое пропадает. CNAME, положенный руками или
+# заведённый только в настройках репозитория, стёрся бы первым же прогоном,
+# а вместе с ним отвалился бы и домен.
+CUSTOM_DOMAIN = "hr.aiordo.ru"
+
+
+def build_cname() -> str:
+    return CUSTOM_DOMAIN + "\n"
+
+
 TARGETS = {
     "apps-script/Headers.gs": build_headers,
     "apps-script/Questions.gs": build_questions,
     "apps-script/Index.html": build_index,
     "dist/index.html": build_static,
+    "dist/CNAME": build_cname,
 }
 
 
