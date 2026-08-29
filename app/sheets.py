@@ -31,6 +31,7 @@ from app.config import (
     STATUS_PROCESSING,
     WORKSHEET_NAME,
 )
+from app.profile import unpack_markers
 
 log = logging.getLogger(__name__)
 
@@ -46,8 +47,10 @@ COL_TELEGRAM = index_of("telegram")
 COL_CREATED_AT = index_of("created_at")
 COL_STATUS = index_of("status")
 COL_FLAGS = index_of("flags")
+COL_AI_MARKERS = index_of("ai_markers")
 STATUS_A1 = col_letter(COL_STATUS)
 FLAGS_A1 = col_letter(COL_FLAGS)
+AI_MARKERS_A1 = col_letter(COL_AI_MARKERS)
 
 
 @lru_cache(maxsize=1)
@@ -112,12 +115,20 @@ def _ensure_total_formula(ws: gspread.Worksheet, row: int) -> None:
 
 # --- Запись ---------------------------------------------------------------
 
-def write_form(row: int, values: list, flags: str, status: str = STATUS_NEW) -> None:
-    """Зона A..AH, флаги телеметрии в AS и статус в AU. Всё RAW, AN не задевается.
+def write_form(
+    row: int,
+    values: list,
+    flags: str,
+    status: str = STATUS_NEW,
+    markers: str = "",
+) -> None:
+    """Зона A..AH плюс три ячейки из AO..AZ. Всё RAW, AN не задевается.
 
-    Флаги телеметрии пишутся уже здесь, а не при обработке: is_mobile и время
-    ухода со вкладки в таблицу не попадают (отдельных колонок под них нет), и
-    после перезапуска процесса восстановить их было бы неоткуда.
+    Флаги (AS) и ответы о мотивации (AP) пишутся уже здесь, а не при
+    обработке: ни is_mobile со временем ухода со вкладки, ни выбранные
+    варианты в лист иначе не попадают — отдельных колонок под них нет, — и
+    после перезапуска процесса восстановить их было бы неоткуда. Статус
+    (AU) начальный.
     """
     assert len(values) == COL_FORM_END - COL_FORM_START + 1, (
         f"ожидалось {COL_FORM_END - COL_FORM_START + 1} значений, получено {len(values)}"
@@ -125,10 +136,26 @@ def write_form(row: int, values: list, flags: str, status: str = STATUS_NEW) -> 
     worksheet().batch_update(
         [
             {"range": a1_range(row, COL_FORM_START, COL_FORM_END), "values": [values]},
+            {"range": f"{AI_MARKERS_A1}{row}", "values": [[markers]]},
             {"range": f"{FLAGS_A1}{row}", "values": [[flags]]},
             {"range": f"{STATUS_A1}{row}", "values": [[status]]},
         ],
         value_input_option="RAW",
+    )
+
+
+def row_has_data(row: list) -> bool:
+    """Есть ли в строке хоть что-то, кроме формулы total_score.
+
+    Колонка AN размечена формулой на сотни строк вперёд. Пока пуста A,
+    формула отдаёт пустую строку — но это её значение, а не содержимое:
+    прочитанная как формула, та же ячейка окажется непустой у трёхсот строк
+    подряд. Поэтому AN при подсчёте заполненности не учитывается вовсе.
+    """
+    return any(
+        str(cell).strip()
+        for i, cell in enumerate(row, start=1)
+        if i != COL_TOTAL_SCORE
     )
 
 
@@ -150,6 +177,18 @@ def read_flags(row: int) -> list[str]:
     if not values or not values[0]:
         return []
     return [f.strip() for f in str(values[0][0]).split(",") if f.strip()]
+
+
+def read_profile(row: int) -> dict:
+    """Ответы на вопросы о мотивации, записанные при сабмите.
+
+    Обработчик перезаписывает всю зону AO..AZ, поэтому обязан вычитать эту
+    ячейку и вернуть ответы обратно — иначе они пропадут вместе с записью
+    признаков машинного текста в ту же колонку.
+    """
+    values = worksheet().get(f"{AI_MARKERS_A1}{row}")
+    cell = values[0][0] if values and values[0] else ""
+    return unpack_markers(cell)[1]
 
 
 def write_result(row: int, scores: list | None, result: list) -> None:

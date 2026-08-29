@@ -12,7 +12,7 @@
  * руками: Headers.gs, Questions.gs и Index.html собираются из HEADERS.py,
  * questions.json и templates/form.html скриптом apps-script/build_gs.py.
  *
- * Зона записи — A..AH плюс AS (флаги телеметрии) и AU (статус new).
+ * Зона записи — A..AH плюс AP (ответы о мотивации), AS (флаги) и AU (статус).
  * Колонка AN (total_score) не трогается: там формула таблицы.
  */
 
@@ -101,7 +101,7 @@ function submitForm(payload) {
   }
 
   var telemetry = parseTelemetry(params.telemetry);
-  var flags = telemetryFlags(telemetry);
+  var flags = telemetryFlags(telemetry).concat(profileFlags(parsed.data.profile));
 
   // Лог до записи: если SpreadsheetApp упадёт, анкету можно восстановить
   // из журнала выполнений.
@@ -149,7 +149,21 @@ function parseBody(e) {
       // Не JSON — значит обычная отправка формы. Это не ошибка.
     }
   }
-  return { params: (e && e.parameter) || {}, json: false };
+  // Обычная отправка формы. У множественного выбора одно имя и несколько
+  // значений: e.parameter хранит только первое, поэтому такие поля берутся
+  // списком из e.parameters.
+  var params = {};
+  var single = (e && e.parameter) || {};
+  var many = (e && e.parameters) || {};
+  for (var key in single) {
+    if (single.hasOwnProperty(key)) params[key] = single[key];
+  }
+  for (var name in many) {
+    if (many.hasOwnProperty(name) && many[name] && many[name].length > 1) {
+      params[name] = many[name];
+    }
+  }
+  return { params: params, json: false };
 }
 
 /**
@@ -189,138 +203,181 @@ function joinErrors(errors) {
   return out.join('; ');
 }
 
-// ============================= Числа ======================================
+// ====================== Ответы с вариантами ===============================
 //
-// Зеркало app/numbers.py. Формат строки обязан совпадать до знака: одна и
-// та же анкета, пришедшая через FastAPI и через Apps Script, должна лечь в
-// колонку одинаково, иначе обработчик разберёт числа только у половины.
+// Зеркало app/profile.py и app/checks.py. Тексты ошибок и формат ячейки
+// обязаны совпадать до знака: одна и та же анкета, пришедшая через FastAPI
+// и через Apps Script, должна лечь в колонку одинаково и получить те же
+// флаги, иначе обработчик разберёт её только у половины кандидатов.
 
-var MONTHS_RU = [
-  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'
-];
+// Между вариантом ответа и уточнением к нему. Тире с пробелами: внутри
+// самих вариантов есть короткое тире без пробелов («10–14»).
+var STOP_SEP = ' — ';
 
-var YM_RE = /^(\d{4})-(\d{2})$/;
-var MONTH_MAX_AGE = 24;   // насколько давние месяцы форма готова принять
-var TEXT_SEP = ' — ';     // между числами и текстовым ответом
+var EMPTY_CHOICE_RU = 'Выберите один вариант';
+var UNKNOWN_CHOICE_RU = 'Такого варианта в анкете нет';
+var EMPTY_TEXT_RU = 'Заполните это поле';
+var TOO_LONG_RU = 'Слишком длинный ответ';
+var FEW_CHOICES_RU = 'Выберите хотя бы один вариант';
+var MANY_CHOICES_RU = 'Выберите не больше двух вариантов';
+var OTHER_REQUIRED_RU = 'Напишите свой вариант';
+var PLACE_REQUIRED_RU = 'Расставьте все четыре места';
+var PLACE_UNIQUE_RU = 'Каждое место должно быть занято один раз';
 
-/** «2026-05» → «Май 2026». Год пишется всегда. */
-function monthLabel(ym) {
-  var m = YM_RE.exec(String(ym || ''));
-  if (!m) return '';
-  var month = parseInt(m[2], 10);
-  if (month < 1 || month > 12) return '';
-  return MONTHS_RU[month - 1] + ' ' + m[1];
+/** «Да» + «Ваш часовой пояс» + «МСК+2» → «Да — Ваш часовой пояс: МСК+2». */
+function formatStop(value, extraLabel, extra) {
+  value = String(value || '').trim();
+  extra = String(extra || '').trim();
+  if (!extra) return value;
+  return value + STOP_SEP + extraLabel + ': ' + extra;
 }
 
-/** Последние count полных месяцев, самый ранний первым. */
-function recentMonths(today, count) {
-  var out = [];
-  for (var i = 0; i < count; i++) {
-    var d = new Date(today.getFullYear(), today.getMonth() - (count - i), 1);
-    var month = d.getMonth() + 1;
-    out.push(d.getFullYear() + '-' + (month < 10 ? '0' : '') + month);
+function asList(value) {
+  if (value === null || value === undefined) return [];
+  if (value instanceof Array) return value;
+  return [value];
+}
+
+/** Один вариант из списка: стоп-вопрос или вопрос-флаг с типом single. */
+function validateChoice(q, params, errors) {
+  var value = String(params[q.field] || '').trim();
+  if (!value) {
+    errors[q.field] = EMPTY_CHOICE_RU;
+    return '';
+  }
+  if (q.options.indexOf(value) === -1) {
+    errors[q.field] = UNKNOWN_CHOICE_RU;
+    return '';
+  }
+  return value;
+}
+
+/** Множественный выбор: от min_choices до max_choices вариантов. */
+function validateMulti(q, params, errors, extras) {
+  var raw = asList(params[q.field]);
+  var chosen = [];
+  for (var i = 0; i < raw.length; i++) {
+    var value = String(raw[i]).trim();
+    if (value) chosen.push(value);
+  }
+
+  for (var j = 0; j < chosen.length; j++) {
+    if (q.options.indexOf(chosen[j]) === -1) {
+      errors[q.field] = UNKNOWN_CHOICE_RU;
+      return [];
+    }
+  }
+  if (chosen.length < q.min_choices) {
+    errors[q.field] = FEW_CHOICES_RU;
+    return [];
+  }
+  if (chosen.length > q.max_choices) {
+    errors[q.field] = MANY_CHOICES_RU;
+    return [];
+  }
+
+  if (q.other_option && chosen.indexOf(q.other_option) !== -1) {
+    var text = normalize(params[q.field + '_other']);
+    if (!text) {
+      errors[q.field + '_other'] = OTHER_REQUIRED_RU;
+    } else if (text.length > q.other_max_length) {
+      errors[q.field + '_other'] = TOO_LONG_RU;
+    } else {
+      // Ключ появляется только когда выбран сам вариант — как в profile.py.
+      extras[q.field + '_other'] = text;
+    }
+  }
+  return chosen;
+}
+
+/** Ранжирование: каждое место занято ровно один раз. */
+function validateRank(q, params, errors) {
+  var out = {};
+  var seen = {};
+  var unique = 0;
+
+  for (var i = 0; i < q.rows.length; i++) {
+    var name = q.rows[i].field;
+    var value = String(params[name] || '').trim();
+    if (q.places.indexOf(value) === -1) {
+      errors[q.field] = PLACE_REQUIRED_RU;
+      return {};
+    }
+    out[name] = value;
+    if (!seen[value]) {
+      seen[value] = true;
+      unique++;
+    }
+  }
+  if (unique !== q.places.length) {
+    errors[q.field] = PLACE_UNIQUE_RU;
+    return {};
   }
   return out;
 }
+
+// --- Флаги по вопросам о мотивации ---------------------------------------
+//
+// Продублировано из app/checks.py. Варианты названы теми же строками, что в
+// questions.json: опечатка в коротком тире молча сделала бы правило
+// нерабочим, поэтому строки копируются, а не переписываются.
+
+var MOTIVE_AVOIDANCE = ['Уйти на удалёнку', 'Сменить сферу'];
+var INCOME_LOW = 'до 50 000 ₽';
+var INCOME_UNREAL = 'более 150 000 ₽';
+var MEETINGS_UNDERESTIMATE = 'Легко достижимо';
+var MEETINGS_PESSIMIST = 'Нереально';
+var GOALS_UNKNOWN = 'Не знаю';
+var RANK_INCOME = 'flag_rank_income';
+var RANK_STABILITY = 'flag_rank_stability';
+var INCOME_LOW_PLACES = ['3', '4'];
 
 /**
- * Месяц из формы или запасной, если пришёл мусор. Поле скрытое, кандидат
- * его не видел — отклонять анкету из-за него нечестно.
+ * Ячейка ai_markers: зеркало profile.pack_markers. Признаки машинного
+ * текста пишет обработчик, ответы кандидата — форма, и живут они в одной
+ * колонке: отдельной под ответы в раскладке нет.
  */
-function normalizeMonth(value, today, fallback) {
-  var m = YM_RE.exec(String(value || '').trim());
-  if (!m) return fallback;
-  var year = parseInt(m[1], 10);
-  var month = parseInt(m[2], 10);
-  if (month < 1 || month > 12) return fallback;
-  var age = (today.getFullYear() - year) * 12 + (today.getMonth() + 1 - month);
-  if (age < 1 || age > MONTH_MAX_AGE) return fallback;
-  return m[1] + '-' + m[2];
-}
-
-/** Целое от 0 до limit либо null. Пробелы внутри числа снимаются. */
-function parseIntStrict(value, limit) {
-  var text = String(value === null || value === undefined ? '' : value).trim();
-  text = text.replace(/[\s\u00a0]/g, '');
-  if (!/^\d+$/.test(text)) return null;
-  var number = parseInt(text, 10);
-  if (number > limit) return null;
-  return number;
-}
-
-var EMPTY_RU = 'Укажите число';
-var NOT_INT_RU = 'Только целое число, без знаков и дробной части';
-var TOO_BIG_RU = 'Число слишком большое';
-
-/** Одно числовое поле. Ошибка встаёт под своим именем. */
-function numberCell(params, name, limit, errors) {
-  var value = String(params[name] || '').trim();
-  if (!value) {
-    errors[name] = EMPTY_RU;
-    return 0;
+function packMarkers(profile, markers) {
+  var hasProfile = false;
+  for (var key in profile) {
+    if (profile.hasOwnProperty(key)) { hasProfile = true; break; }
   }
-  var number = parseIntStrict(value, limit);
-  if (number === null) {
-    errors[name] = /^[\d\s\u00a0]+$/.test(value) ? TOO_BIG_RU : NOT_INT_RU;
-    return 0;
-  }
-  return number;
+  if (!hasProfile && (!markers || !markers.length)) return '';
+  return JSON.stringify({ markers: markers || [], profile: profile || {} });
 }
 
-/** Девять чисел вопроса 1 плюс месяцы, к которым они относятся. */
-function validateQ1Numbers(params, question, today, errors) {
-  var schema = question.months || { slots: [], columns: [] };
-  var expected = recentMonths(today, schema.slots.length);
-  var months = [];
+/** Повторяет app/checks.py: profile_flags. Баллов эти флаги не меняют. */
+function profileFlags(profile) {
+  var flags = [];
 
-  for (var i = 0; i < schema.slots.length; i++) {
-    var prefix = 'q1_' + schema.slots[i] + '_';
-    var month = {
-      month: normalizeMonth(params[prefix + 'month'], today, expected[i])
-    };
-    for (var c = 0; c < schema.columns.length; c++) {
-      var col = schema.columns[c];
-      month[col.key] = numberCell(params, prefix + col.key, col.max, errors);
-    }
-    months.push(month);
+  var motive = profile.flag_motive || [];
+  if (motive.length === 1 && MOTIVE_AVOIDANCE.indexOf(motive[0]) !== -1) {
+    addFlag(flags, 'MOTIVATION_AVOIDANCE');
   }
-  return months;
-}
 
-/** Три метрики воронки вопроса 4. */
-function validateQ4Numbers(params, question, errors) {
-  var metrics = question.metrics || [];
-  var out = {};
-  for (var i = 0; i < metrics.length; i++) {
-    var name = metrics[i].field;
-    out[name.substring(3)] = numberCell(params, name, metrics[i].max, errors);
+  var income = profile.flag_income || '';
+  if (income === INCOME_LOW) {
+    addFlag(flags, 'INCOME_LOW');
+  } else if (income === INCOME_UNREAL) {
+    addFlag(flags, 'INCOME_UNREAL');
   }
-  return out;
-}
 
-/** «Май 2026: 4 / 260000 / 65000; … — что считал закрытой сделкой». */
-function formatQ1(months, text) {
-  var parts = [];
-  for (var i = 0; i < months.length; i++) {
-    var m = months[i];
-    parts.push(
-      monthLabel(m.month) + ': ' + m.deals + ' / ' + m.revenue + ' / ' + m.check
-    );
+  var rank = profile.flag_rank || {};
+  if (rank[RANK_STABILITY] === '1') addFlag(flags, 'STABILITY_FIRST');
+  if (INCOME_LOW_PLACES.indexOf(rank[RANK_INCOME]) !== -1) {
+    addFlag(flags, 'INCOME_NOT_PRIORITY');
   }
-  var line = parts.join('; ');
-  text = String(text || '').trim();
-  return text ? line + TEXT_SEP + text : line;
-}
 
-/** «Касание→встреча: 12%; Встреча→оплата: 30%; Цикл сделки: 21 дн — …». */
-function formatQ4(numbers, text) {
-  var line =
-    'Касание→встреча: ' + numbers.conv_touch + '%; ' +
-    'Встреча→оплата: ' + numbers.conv_deal + '%; ' +
-    'Цикл сделки: ' + numbers.cycle_days + ' дн';
-  text = String(text || '').trim();
-  return text ? line + TEXT_SEP + text : line;
+  var meetings = profile.flag_meetings || '';
+  if (meetings === MEETINGS_UNDERESTIMATE) {
+    addFlag(flags, 'UNDERESTIMATE');
+  } else if (meetings === MEETINGS_PESSIMIST) {
+    addFlag(flags, 'PESSIMIST');
+  }
+
+  if ((profile.flag_goals || '') === GOALS_UNKNOWN) addFlag(flags, 'NO_GOALS');
+
+  return flags;
 }
 
 // =========================== Валидация ====================================
@@ -380,30 +437,48 @@ function validate(params) {
       'Без согласия на обработку персональных данных анкету не принять';
   }
 
+  // Стоп-вопросы. Уточнение к вопросу — часовой пояс — приписывается к
+  // ячейке того же вопроса: новых колонок под него в листе нет.
   data.stops = {};
   for (var i = 0; i < QUESTIONS.stop_questions.length; i++) {
-    var field = QUESTIONS.stop_questions[i].field;
-    var value = String(params[field] || '').trim();
-    if (value !== 'Да' && value !== 'Нет') {
-      errors[field] = 'Выберите «Да» или «Нет»';
+    var sq = QUESTIONS.stop_questions[i];
+    var choice = validateChoice(sq, params, errors);
+    if (!sq.extra) {
+      data.stops[sq.field] = choice;
+      continue;
     }
-    data.stops[field] = value;
+    var extra = normalize(params[sq.extra.field]);
+    if (!extra) {
+      errors[sq.extra.field] = EMPTY_TEXT_RU;
+    } else if (extra.length > sq.extra.max_length) {
+      errors[sq.extra.field] = TOO_LONG_RU;
+    }
+    data.stops[sq.field] = formatStop(choice, sq.extra.label, extra);
+  }
+
+  // Вопросы-флаги. В лист они не пишутся: из них получаются флаги, а те
+  // ложатся в колонку AS вместе с флагами телеметрии.
+  data.profile = {};
+  var extras = {};
+  for (var f = 0; f < QUESTIONS.flag_questions.length; f++) {
+    var fq = QUESTIONS.flag_questions[f];
+    if (fq.type === 'multi') {
+      data.profile[fq.field] = validateMulti(fq, params, errors, extras);
+    } else if (fq.type === 'rank') {
+      data.profile[fq.field] = validateRank(fq, params, errors);
+    } else {
+      data.profile[fq.field] = validateChoice(fq, params, errors);
+    }
+  }
+  for (var extraKey in extras) {
+    if (extras.hasOwnProperty(extraKey)) data.profile[extraKey] = extras[extraKey];
   }
 
   data.answers = {};
-  var today = new Date();
-  var q1Months = null;
-  var q4Numbers = null;
-
   for (var j = 0; j < QUESTIONS.open_questions.length; j++) {
     var oq = QUESTIONS.open_questions[j];
     var text = normalize(params[oq.field]);
     data.answers[oq.field] = text;
-
-    // Числа живут в своих полях, поэтому проверяются отдельно от текста —
-    // и длина текста считается без них, иначе минимум набирался бы цифрами.
-    if (oq.months) q1Months = validateQ1Numbers(params, oq, today, errors);
-    if (oq.metrics) q4Numbers = validateQ4Numbers(params, oq, errors);
 
     if (!text) {
       errors[oq.field] = 'Ответьте на этот вопрос';
@@ -417,14 +492,6 @@ function validate(params) {
     } else if (oq.max_length && text.length > oq.max_length) {
       errors[oq.field] = 'Не больше ' + oq.max_length + ' знаков';
     }
-  }
-
-  // Числа приписываются к тексту только теперь, когда длина уже проверена.
-  if (q1Months) {
-    data.answers.q1_text = formatQ1(q1Months, data.answers.q1_text);
-  }
-  if (q4Numbers) {
-    data.answers.q4_text = formatQ4(q4Numbers, data.answers.q4_text);
   }
 
   return { ok: !hasKeys(errors), errors: errors, data: data };
@@ -538,6 +605,9 @@ function writeSubmission(data, telemetry, flags) {
 
     sheet.getRange(row, 1, 1, COL_FORM_END)
       .setValues([buildFormRow(data, telemetry)]);
+    // Ответы о мотивации кладём в AP сразу: отдельной колонки под них нет,
+    // а в анкетной зоне A..AH их не бывает — обработчик их уже не увидит.
+    sheet.getRange(row, COL_AI_MARKERS).setValue(packMarkers(data.profile, []));
     sheet.getRange(row, COL_FLAGS).setValue(flags.join(', '));
     sheet.getRange(row, COL_STATUS)
       .setValue(duplicate ? STATUS_DUPLICATE : STATUS_NEW);

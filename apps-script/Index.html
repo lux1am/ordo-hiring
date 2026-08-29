@@ -50,7 +50,7 @@
   .hint { color: var(--muted); font-size: 14px; font-weight: 400; margin-bottom: 8px; }
   .field { margin-bottom: 20px; }
   .field:last-child { margin-bottom: 0; }
-  input[type=text], input[type=url], input[type=number], textarea {
+  input[type=text], input[type=url], textarea, select {
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--line);
@@ -60,34 +60,15 @@
     font: inherit;
     font-size: 16px; /* меньше 16px — iOS зумит страницу при фокусе */
   }
-  input:focus, textarea:focus {
+  input:focus, textarea:focus, select:focus {
     outline: 2px solid var(--accent);
     outline-offset: -1px;
     border-color: var(--accent);
   }
   textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
-  /* Числовые блоки Q1 и Q4. Числа кандидат вводит полями, а не текстом:
-     так их не нужно вылавливать из фразы, и они сразу пригодны для сверки. */
-  .numbers { margin: 0 0 16px; }
-  .month-row {
-    display: grid;
-    grid-template-columns: 132px repeat(3, 1fr);
-    gap: 10px;
-    align-items: end;
-    margin-bottom: 10px;
-  }
-  .month-name { font-weight: 550; padding-bottom: 11px; }
-  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-  .num-cell label {
-    font-size: 13px;
-    font-weight: 400;
-    color: var(--muted);
-    margin-bottom: 5px;
-  }
-  /* Подписи колонок повторяются в каждой строке месяца — на широком экране
-     это шум, поэтому видна только первая. На узком сетка перестраивается,
-     и подписи возвращаются: там строки идут одна под другой. */
-  .month-row + .month-row .num-cell label { visibility: hidden; }
+  /* Короткие задания: ответ в одно-два предложения, и высокое поле
+     подсказывало бы кандидату писать длиннее, чем просят. */
+  textarea.short { min-height: 84px; }
   .counter { font-size: 13px; color: var(--muted); margin-top: 6px; }
   .counter.ok { color: #15803d; }
   .counter.limit { color: #c2410c; }
@@ -105,7 +86,7 @@
   .q-num { font-weight: 650; display: block; margin-bottom: 4px; }
   .radio-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .radio-row label {
-    flex: 1 1 120px;
+    flex: 1 1 150px;
     margin: 0;
     padding: 11px 14px;
     border: 1px solid var(--line);
@@ -123,8 +104,27 @@
     box-shadow: inset 0 0 0 1px var(--accent);
     background: #fafaf9;
   }
+  /* Вариант, который уже нельзя выбрать: предел в два ответа выбран. */
+  .radio-row label.off { opacity: .45; cursor: default; }
   .stop-q { padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
   .stop-q:last-child { border-bottom: 0; padding-bottom: 0; margin-bottom: 0; }
+  /* Уточнение к стоп-вопросу: часовой пояс, свой вариант ответа. */
+  .sub-field { margin-top: 12px; }
+  .sub-field label { font-size: 14px; font-weight: 400; color: var(--muted); }
+  /* Ранжирование: подпись слева, место справа. Выпадающий список узкий —
+     в нём всего четыре пункта, и растянутый на всю строку он читался бы
+     как обычное поле ввода. */
+  .rank { margin-top: 10px; }
+  .rank-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .rank-row:last-child { border-bottom: 0; }
+  .rank-row label { flex: 1; margin: 0; font-weight: 500; }
+  .rank-row select { width: 76px; flex-shrink: 0; padding: 9px 10px; }
   .consent { display: flex; gap: 10px; align-items: flex-start; }
   .consent input { margin-top: 4px; width: 18px; height: 18px; flex-shrink: 0; }
   .consent label { font-weight: 400; margin: 0; }
@@ -162,10 +162,7 @@
     section { padding: 16px; border-radius: 6px; }
     h1 { font-size: 21px; }
     .radio-row label { flex: 1 1 100%; }
-    .month-row { grid-template-columns: 1fr; gap: 8px; margin-bottom: 18px; }
-    .month-name { padding-bottom: 0; }
-    .month-row + .month-row .num-cell label { visibility: visible; }
-    .metrics { grid-template-columns: 1fr; }
+    .rank-row { gap: 8px; }
   }
 </style>
 </head>
@@ -219,61 +216,94 @@
                роль кнопки играет label. Нативная валидация на скрытом поле
                может заблокировать отправку, не показав сообщения. Ответ
                проверяет сервер — см. validate() в Code.gs. -->
+          <? for (var o = 0; o < sq.options.length; o++) { ?>
           <label>
-            <input type="radio" name="<?= sq.field ?>" value="Да"><span>Да</span>
+            <input type="radio" name="<?= sq.field ?>" value="<?= sq.options[o] ?>"><span><?= sq.options[o] ?></span>
           </label>
-          <label>
-            <input type="radio" name="<?= sq.field ?>" value="Нет"><span>Нет</span>
-          </label>
+          <? } ?>
         </div>
         <div class="field-error" data-error-for="<?= sq.field ?>"></div>
+      </div>
+      <? if (sq.extra) { ?>
+      <div class="stop-q">
+        <label for="<?= sq.extra.field ?>"><?= sq.extra.label ?></label>
+        <input type="text" id="<?= sq.extra.field ?>" name="<?= sq.extra.field ?>" required
+          maxlength="<?= sq.extra.max_length ?>" placeholder="<?= sq.extra.placeholder ?>"
+          title="Напишите свой часовой пояс: МСК, МСК+2 или город">
+        <div class="field-error" data-error-for="<?= sq.extra.field ?>"></div>
+      </div>
+      <? } ?>
+      <? } ?>
+    </section>
+
+    <section>
+      <h2>Мотивация и ожидания</h2>
+      <? for (var f = 0; f < QUESTIONS.flag_questions.length; f++) {
+           var fq = QUESTIONS.flag_questions[f]; ?>
+      <div class="stop-q">
+        <div class="q-text"><?= fq.text ?></div>
+        <? if (fq.hint) { ?><div class="hint"><?= fq.hint ?></div><? } ?>
+        <? if (fq.type === 'multi') { ?>
+        <div class="radio-row" data-choice-group="<?= fq.field ?>"
+          data-min-choices="<?= fq.min_choices ?>" data-max-choices="<?= fq.max_choices ?>">
+          <? for (var m = 0; m < fq.options.length; m++) { ?>
+          <label>
+            <input type="checkbox" name="<?= fq.field ?>" value="<?= fq.options[m] ?>"><span><?= fq.options[m] ?></span>
+          </label>
+          <? } ?>
+        </div>
+        <? if (fq.other_option) { ?>
+        <!-- Без hidden в разметке намеренно: при отключённом JavaScript поле
+             осталось бы скрытым навсегда, и выбравший «Другое» не смог бы
+             ответить. Прячет его syncChoiceGroup сразу при загрузке. -->
+        <div class="sub-field" data-other-box="<?= fq.field ?>">
+          <input type="text" name="<?= fq.field ?>_other"
+            maxlength="<?= fq.other_max_length ?>" placeholder="<?= fq.other_placeholder ?>"
+            data-other-for="<?= fq.field ?>" data-other-value="<?= fq.other_option ?>">
+          <div class="field-error" data-error-for="<?= fq.field ?>_other"></div>
+        </div>
+        <? } ?>
+        <? } ?>
+        <? if (fq.type === 'single') { ?>
+        <div class="radio-row">
+          <? for (var s = 0; s < fq.options.length; s++) { ?>
+          <label>
+            <input type="radio" name="<?= fq.field ?>" value="<?= fq.options[s] ?>"><span><?= fq.options[s] ?></span>
+          </label>
+          <? } ?>
+        </div>
+        <? } ?>
+        <? if (fq.type === 'rank') { ?>
+        <div class="rank" data-rank-group="<?= fq.field ?>">
+          <? for (var r = 0; r < fq.rows.length; r++) {
+               var row = fq.rows[r]; ?>
+          <div class="rank-row">
+            <label for="<?= row.field ?>"><?= row.label ?></label>
+            <select id="<?= row.field ?>" name="<?= row.field ?>" required>
+              <option value="">—</option>
+              <? for (var p = 0; p < fq.places.length; p++) { ?>
+              <option value="<?= fq.places[p] ?>"><?= fq.places[p] ?></option>
+              <? } ?>
+            </select>
+          </div>
+          <? } ?>
+        </div>
+        <? } ?>
+        <div class="field-error" data-error-for="<?= fq.field ?>"></div>
       </div>
       <? } ?>
     </section>
 
     <section>
-      <h2>Опыт</h2>
+      <h2>Вопросы</h2>
       <? for (var j = 0; j < QUESTIONS.open_questions.length; j++) {
            var oq = QUESTIONS.open_questions[j]; ?>
       <div class="field">
         <span class="q-num"><?= oq.label ?></span>
         <div class="q-text"><?= oq.text ?></div>
-        <? if (oq.months) { ?>
-        <div class="numbers">
-          <? for (var s = 0; s < oq.months.slots.length; s++) {
-               var slot = oq.months.slots[s]; ?>
-          <div class="month-row">
-            <div class="month-name" data-month-label="<?= slot ?>"></div>
-            <input type="hidden" name="q1_<?= slot ?>_month" data-month-value="<?= slot ?>">
-            <? for (var c = 0; c < oq.months.columns.length; c++) {
-                 var col = oq.months.columns[c];
-                 var name = 'q1_' + slot + '_' + col.key; ?>
-            <div class="num-cell">
-              <label for="<?= name ?>"><?= col.label ?></label>
-              <input type="number" inputmode="numeric" step="1" min="0" max="<?= col.max ?>"
-                id="<?= name ?>" name="<?= name ?>" required>
-              <div class="field-error" data-error-for="<?= name ?>"></div>
-            </div>
-            <? } ?>
-          </div>
-          <? } ?>
-        </div>
-        <? } ?>
-        <? if (oq.metrics) { ?>
-        <div class="numbers metrics">
-          <? for (var k = 0; k < oq.metrics.length; k++) {
-               var metric = oq.metrics[k]; ?>
-          <div class="num-cell">
-            <label for="<?= metric.field ?>"><?= metric.label ?></label>
-            <input type="number" inputmode="numeric" step="1" min="0" max="<?= metric.max ?>"
-              id="<?= metric.field ?>" name="<?= metric.field ?>" required>
-            <div class="field-error" data-error-for="<?= metric.field ?>"></div>
-          </div>
-          <? } ?>
-        </div>
-        <? } ?>
         <? if (oq.text_label) { ?><div class="hint"><?= oq.text_label ?></div><? } ?>
         <textarea id="<?= oq.field ?>" name="<?= oq.field ?>" data-telemetry="<?= oq.field ?>"
+          <? if (oq.short) { ?>class="short"<? } ?>
           data-min="<?= oq.min_length || 0 ?>"
           <? if (oq.max_length) { ?>maxlength="<?= oq.max_length ?>"<? } ?>
           required></textarea>
@@ -373,32 +403,9 @@ window.submitPayload = function (data) {
     return { text: shortfallText(min - length), cls: "counter" };
   }
 
-  // Месяцы вопроса 1 считает браузер, а не сборка: статическая страница
-  // собирается один раз при деплое, и зашитые в неё названия через квартал
-  // спрашивали бы уже не про последние три месяца. Сервер пересчитывает их
-  // сам и присланному значению не верит — см. normalize_month.
-  var MONTHS_RU = [
-    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
-  ];
-
-  // Последние `count` полных месяцев, самый ранний первым. Полный — значит
-  // завершившийся: про текущий месяц кандидату ещё нечего сказать.
-  function monthSlots(now, count) {
-    var out = [];
-    for (var i = 0; i < count; i++) {
-      var d = new Date(now.getFullYear(), now.getMonth() - (count - i), 1);
-      var month = d.getMonth() + 1;
-      out.push({
-        label: MONTHS_RU[d.getMonth()] + " " + d.getFullYear(),
-        value: d.getFullYear() + "-" + (month < 10 ? "0" : "") + month
-      });
-    }
-    return out;
-  }
-
   var REQUIRED_TEXT = "Заполните это поле";
   var CONSENT_REQUIRED_TEXT = "Отметьте согласие — без него анкету не отправить";
+  var PLACE_REQUIRED_TEXT = "Расставьте все четыре места";
   var FORMAT_TEXT = "Проверьте формат";
 
   var PAUSE_MS = 5000;   // пауза дольше пяти секунд не считается временем набора
@@ -501,28 +508,13 @@ window.submitPayload = function (data) {
     }
   });
 
-  // ------------------------ Месяцы вопроса 1 -----------------------------
-
-  (function fillMonths() {
-    var labels = document.querySelectorAll("[data-month-label]");
-    if (!labels.length) return;
-    var slots = monthSlots(new Date(), labels.length);
-    Array.prototype.forEach.call(labels, function (el, i) {
-      el.textContent = slots[i].label;
-      var hidden = document.querySelector(
-        '[data-month-value="' + el.getAttribute("data-month-label") + '"]'
-      );
-      if (hidden) hidden.value = slots[i].value;
-    });
-  })();
-
   // ------------------------- Отправка ------------------------------------
 
   var form = document.getElementById("form");
   var btn = document.getElementById("submit-btn");
   var formError = document.getElementById("form-error");
 
-  var RADIO_REQUIRED_TEXT = "Выберите «Да» или «Нет»";
+  var RADIO_REQUIRED_TEXT = "Выберите один вариант";
 
   function radioGroups() {
     var groups = {};
@@ -557,6 +549,145 @@ window.submitPayload = function (data) {
     });
   });
 
+  // ------------------- Множественный выбор -------------------------------
+  //
+  // Чекбоксы скрыты теми же стилями, что радиокнопки, поэтому required к
+  // ним неприменим: сообщение у невидимого поля браузер не покажет.
+  // Пределы выбора проверяются здесь, а сервер повторяет ту же проверку —
+  // см. validate() в Code.gs.
+
+  var CHOICE_MIN_TEXT = "Выберите хотя бы один вариант";
+  var CHOICE_MAX_TEXT = "Выберите не больше двух вариантов";
+  var OTHER_REQUIRED_TEXT = "Напишите свой вариант";
+
+  function nodes(selector) {
+    return Array.prototype.slice.call(form.querySelectorAll(selector));
+  }
+
+  function boxesIn(group) {
+    return Array.prototype.slice.call(
+      group.querySelectorAll('input[type="checkbox"]')
+    );
+  }
+
+  function chosenIn(group) {
+    return boxesIn(group).filter(function (el) { return el.checked; });
+  }
+
+  function otherInput(name) {
+    return form.querySelector('[data-other-for="' + name + '"]');
+  }
+
+  function otherChosen(group, other) {
+    var value = other.getAttribute("data-other-value");
+    return chosenIn(group).some(function (el) { return el.value === value; });
+  }
+
+  function validateChoiceGroups() {
+    var errors = {};
+    nodes("[data-choice-group]").forEach(function (group) {
+      var name = group.getAttribute("data-choice-group");
+      var min = parseInt(group.getAttribute("data-min-choices"), 10) || 0;
+      var max = parseInt(group.getAttribute("data-max-choices"), 10) || 0;
+      var chosen = chosenIn(group);
+
+      if (chosen.length < min) {
+        errors[name] = CHOICE_MIN_TEXT;
+        return;
+      }
+      if (max && chosen.length > max) {
+        errors[name] = CHOICE_MAX_TEXT;
+        return;
+      }
+
+      var other = otherInput(name);
+      if (other && otherChosen(group, other) && !normalize(other.value)) {
+        errors[other.name] = OTHER_REQUIRED_TEXT;
+      }
+    });
+    return errors;
+  }
+
+  // Выбранный предел лучше показать, чем объяснить после отправки: лишние
+  // варианты гаснут, как только набрано максимальное число ответов.
+  function syncChoiceGroup(group) {
+    var name = group.getAttribute("data-choice-group");
+    var max = parseInt(group.getAttribute("data-max-choices"), 10) || 0;
+    var count = chosenIn(group).length;
+
+    boxesIn(group).forEach(function (el) {
+      var off = !!max && !el.checked && count >= max;
+      el.disabled = off;
+      if (el.parentNode && el.parentNode.classList) {
+        el.parentNode.classList.toggle("off", off);
+      }
+    });
+
+    var other = otherInput(name);
+    if (!other) return;
+    var box = form.querySelector('[data-other-box="' + name + '"]');
+    var on = otherChosen(group, other);
+    if (box) box.hidden = !on;
+    if (!on) other.value = "";
+  }
+
+  nodes("[data-choice-group]").forEach(function (group) {
+    var name = group.getAttribute("data-choice-group");
+    boxesIn(group).forEach(function (el) {
+      el.addEventListener("change", function () {
+        syncChoiceGroup(group);
+        var errorBox = document.querySelector('[data-error-for="' + name + '"]');
+        if (errorBox) errorBox.textContent = "";
+      });
+    });
+    syncChoiceGroup(group);
+  });
+
+  // ---------------------- Ранжирование -----------------------------------
+  //
+  // Пустое место ловит required на самом select — он видим, и браузер
+  // покажет подсказку сам. Здесь проверяется только то, чего нативная
+  // валидация не знает: каждое место занято ровно один раз.
+
+  var PLACE_UNIQUE_TEXT = "Каждое место должно быть занято один раз";
+
+  function validateRankGroups() {
+    var errors = {};
+    nodes("[data-rank-group]").forEach(function (group) {
+      var name = group.getAttribute("data-rank-group");
+      var selects = Array.prototype.slice.call(group.querySelectorAll("select"));
+      var values = selects.map(function (el) { return el.value; })
+        .filter(function (v) { return v !== ""; });
+      if (values.length < selects.length) return;
+
+      var seen = {};
+      var duplicate = values.some(function (v) {
+        if (seen[v]) return true;
+        seen[v] = true;
+        return false;
+      });
+      if (duplicate) errors[name] = PLACE_UNIQUE_TEXT;
+    });
+    return errors;
+  }
+
+  nodes("[data-rank-group] select").forEach(function (el) {
+    el.addEventListener("change", function () {
+      var group = el.closest ? el.closest("[data-rank-group]") : null;
+      var name = group ? group.getAttribute("data-rank-group") : "";
+      var box = document.querySelector('[data-error-for="' + name + '"]');
+      if (box) box.textContent = "";
+    });
+  });
+
+  function merge() {
+    var out = {};
+    Array.prototype.forEach.call(arguments, function (part) {
+      Object.keys(part).forEach(function (key) { out[key] = part[key]; });
+    });
+    return out;
+  }
+
   // ------------------ нативные подсказки по-русски -----------------------
   // Язык встроенных сообщений задаёт браузер кандидата, а не страница: в
   // русской анкете всплыло бы «Please fill out this field». Поэтому текст
@@ -566,16 +697,13 @@ window.submitPayload = function (data) {
     var v = el.validity;
     if (v.valid) return "";
     if (v.valueMissing) {
-      return el.type === "checkbox" ? CONSENT_REQUIRED_TEXT : REQUIRED_TEXT;
+      if (el.type === "checkbox") return CONSENT_REQUIRED_TEXT;
+      // Пустое место в ранжировании: единственный select в анкете.
+      if (el.type === "select-one") return PLACE_REQUIRED_TEXT;
+      return REQUIRED_TEXT;
     }
     if (v.tooShort) return "Слишком коротко: нужно хотя бы " + chars(el.minLength);
     if (v.tooLong) return "Слишком длинно: не больше " + chars(el.maxLength);
-    // Числовые поля Q1 и Q4: у браузера для них свои состояния, и без этих
-    // веток кандидат увидел бы общее «Проверьте формат».
-    if (v.badInput) return "Введите число";
-    if (v.stepMismatch) return "Только целое число, без дробной части";
-    if (v.rangeUnderflow) return "Число не может быть отрицательным";
-    if (v.rangeOverflow) return "Слишком большое число";
     return (el.getAttribute("title") || "").trim() || FORMAT_TEXT;
   }
 
@@ -626,7 +754,15 @@ window.submitPayload = function (data) {
   function collectPayload() {
     var data = {};
     var fd = new FormData(form);
-    fd.forEach(function (value, key) { data[key] = value; });
+    // У множественного выбора одно имя и несколько значений: forEach вернул
+    // бы только последнее, поэтому такие поля собираются списком.
+    fd.forEach(function (value, key) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        data[key] = [].concat(data[key], value);
+      } else {
+        data[key] = value;
+      }
+    });
     return data;
   }
 
@@ -680,8 +816,12 @@ window.submitPayload = function (data) {
     e.preventDefault();
     clearErrors();
 
-    // Стоп-вопросы проверяются первыми: их браузер не проверит сам.
-    var radioErrors = validateRadioGroups();
+    // Выбор вариантов проверяется первым: скрытые радиокнопки и чекбоксы
+    // браузер не проверит сам, а несовпадение мест в ранжировании ему
+    // вовсе неизвестно.
+    var radioErrors = merge(
+      validateRadioGroups(), validateChoiceGroups(), validateRankGroups()
+    );
     if (Object.keys(radioErrors).length) {
       showErrors(radioErrors);
       return;

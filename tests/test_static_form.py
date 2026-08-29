@@ -98,11 +98,18 @@ def test_questions_are_baked_in():
     for sq in QUESTIONS["stop_questions"]:
         assert sq["text"] in DIST_HTML, sq["field"]
         assert f'name="{sq["field"]}"' in DIST_HTML
+        for opt in sq["options"]:
+            assert f'value="{opt}"' in DIST_HTML, f'{sq["field"]}: {opt}' 
+
+    for fq in QUESTIONS["flag_questions"]:
+        assert fq["text"] in DIST_HTML, fq["field"]
 
     for oq in QUESTIONS["open_questions"]:
         assert oq["text"] in DIST_HTML, oq["field"]
         assert f'data-telemetry="{oq["field"]}"' in DIST_HTML
-        assert f'data-min="{oq["min_length"]}"' in DIST_HTML
+        # У вопроса без нижнего порога в разметке стоит ноль — счётчику
+        # нужно число в любом случае.
+        assert f'data-min="{oq.get("min_length", 0)}"' in DIST_HTML
 
 
 def test_honeypot_name_matches_server():

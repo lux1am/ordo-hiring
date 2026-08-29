@@ -1,71 +1,86 @@
 {
-  "name": "Слабый кандидат: нули в цифрах и общие слова",
+  "name": "Слабый кандидат: общие слова без конкретики",
   "stops": {
-    "stop_1_oklad": "Да",
-    "stop_2_komissiya": "Да",
-    "stop_3_kasaniya": "Да",
-    "stop_4_vstrechi": "Да",
-    "stop_5_vedenie": "Да",
-    "stop_6_crm": "Да"
+    "stop_1_sdelno": "Да, полностью готов",
+    "stop_2_chasy": "15–19",
+    "stop_3_svyaz": "Да — Ваш часовой пояс: МСК",
+    "stop_4_oformlenie": "ГПХ",
+    "stop_5_tehnika": "Да, всё есть",
+    "stop_6_zapis": "Скорее да"
   },
   "answers": {
-    "q1_text": "Март 2026: 0 / 0 / 0; Апрель 2026: 0 / 0 / 0; Май 2026: 0 / 0 / 0 — Точных цифр не помню, отдельно закрытые сделки я никак не фиксировал.",
-    "q2_text": "В основном работал с входящими заявками с сайта и от маркетинга. Иногда прозванивал старую базу клиентов, но системного холодного потока у меня не было.",
-    "q3_text": "Общался с менеджерами по закупкам и специалистами отделов. Иногда подключался руководитель, но решение принимали без меня, я больше отвечал за подготовку материалов.",
-    "q4_text": "Касание→встреча: 0%; Встреча→оплата: 0%; Цикл сделки: 0 дн — Конверсии не считал, ориентировался на то, сколько сделок висит в работе.",
-    "q5_text": "Был сложный клиент, долго не могли договориться по условиям. В итоге нашли компромисс и подписали договор, клиент остался доволен сотрудничеством."
+    "q1_text": "Отказы это нормальная часть работы, я не расстраиваюсь и буду продолжать дальше звонить, потому что всегда так бывает в продажах.",
+    "q2_text": "Хорошо, отправлю вам информацию на почту.",
+    "q3_text": "Здравствуйте, мы компания по автоматизации бизнеса.",
+    "q4_text": "Я человек организованный и дисциплинированный, умею планировать своё время и всегда довожу начатое до конца, поэтому проблем с работой из дома не будет.",
+    "q5_text": "Опыта в продажах нет, работал раньше в другой сфере, хочу попробовать себя тут."
+  },
+  "profile": {
+    "flag_motive": [
+      "Высокий доход без потолка"
+    ],
+    "flag_income": "80 000–120 000 ₽",
+    "flag_rank": {
+      "flag_rank_income": "1",
+      "flag_rank_schedule": "2",
+      "flag_rank_growth": "3",
+      "flag_rank_stability": "4"
+    },
+    "flag_meetings": "Достижимо при усилиях",
+    "flag_goals": "РОП"
   },
   "telemetry": {
     "is_mobile": false,
-    "tab_switches": 1,
-    "total_time_sec": 620,
+    "tab_switches": 2,
+    "total_time_sec": 900,
     "fields": {
       "q1_text": {
-        "length": 165,
+        "length": 140,
         "pasted_chars": 0,
-        "speed_cpm": 140,
-        "backspaces": 12
+        "speed_cpm": 160,
+        "backspaces": 12,
+        "away_before_input_sec": 0
       },
       "q2_text": {
-        "length": 155,
+        "length": 140,
         "pasted_chars": 0,
-        "speed_cpm": 135,
-        "backspaces": 9
+        "speed_cpm": 160,
+        "backspaces": 12,
+        "away_before_input_sec": 0
       },
       "q3_text": {
-        "length": 165,
+        "length": 140,
         "pasted_chars": 0,
-        "speed_cpm": 142,
-        "backspaces": 11
+        "speed_cpm": 160,
+        "backspaces": 12,
+        "away_before_input_sec": 0
       },
       "q4_text": {
         "length": 140,
         "pasted_chars": 0,
-        "speed_cpm": 130,
-        "backspaces": 8
+        "speed_cpm": 160,
+        "backspaces": 12,
+        "away_before_input_sec": 0
       },
       "q5_text": {
-        "length": 150,
+        "length": 140,
         "pasted_chars": 0,
-        "speed_cpm": 138,
-        "backspaces": 10
+        "speed_cpm": 160,
+        "backspaces": 12,
+        "away_before_input_sec": 0
       }
     }
   },
-  "auto_filters": {
-    "q3_senior_dm_confirmed": false,
-    "q1_definition_ok": false
-  },
-  "ai_style": 35,
+  "ai_style": 45,
   "expected": {
     "scores": {
-      "q1": 0,
+      "q1": 1,
       "q2": 0,
       "q3": 0,
-      "q4": 0,
-      "q5": 0
+      "q4": 1,
+      "q5": 1
     },
-    "total": 0,
+    "total": 3,
     "verdict": "C",
     "status": "done",
     "flags": []

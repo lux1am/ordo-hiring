@@ -64,6 +64,7 @@ def build_headers() -> str:
         f"const HEADERS = [\n  {names}\n];\n\n"
         f"const COL_FORM_END = {H.COL_FORM_END};        // AH — последняя колонка анкеты\n"
         f"const COL_FLAGS = {H.index_of('flags')};             // AS\n"
+        f"const COL_AI_MARKERS = {H.index_of('ai_markers')};        // AP\n"
         f"const COL_STATUS = {H.index_of('status')};            // AU\n"
         f"const COL_TELEGRAM = {H.index_of('telegram')};           // D\n"
         f"const COL_TOTAL_SCORE = {H.COL_TOTAL_SCORE};        // AN — формула, не трогаем\n"

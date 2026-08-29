@@ -60,61 +60,94 @@
                роль кнопки играет label. Нативная валидация на скрытом поле
                может заблокировать отправку, не показав сообщения. Ответ
                проверяет сервер — см. validate() в Code.gs. -->
+          <? for (var o = 0; o < sq.options.length; o++) { ?>
           <label>
-            <input type="radio" name="<?= sq.field ?>" value="Да"><span>Да</span>
+            <input type="radio" name="<?= sq.field ?>" value="<?= sq.options[o] ?>"><span><?= sq.options[o] ?></span>
           </label>
-          <label>
-            <input type="radio" name="<?= sq.field ?>" value="Нет"><span>Нет</span>
-          </label>
+          <? } ?>
         </div>
         <div class="field-error" data-error-for="<?= sq.field ?>"></div>
+      </div>
+      <? if (sq.extra) { ?>
+      <div class="stop-q">
+        <label for="<?= sq.extra.field ?>"><?= sq.extra.label ?></label>
+        <input type="text" id="<?= sq.extra.field ?>" name="<?= sq.extra.field ?>" required
+          maxlength="<?= sq.extra.max_length ?>" placeholder="<?= sq.extra.placeholder ?>"
+          title="Напишите свой часовой пояс: МСК, МСК+2 или город">
+        <div class="field-error" data-error-for="<?= sq.extra.field ?>"></div>
+      </div>
+      <? } ?>
+      <? } ?>
+    </section>
+
+    <section>
+      <h2>Мотивация и ожидания</h2>
+      <? for (var f = 0; f < QUESTIONS.flag_questions.length; f++) {
+           var fq = QUESTIONS.flag_questions[f]; ?>
+      <div class="stop-q">
+        <div class="q-text"><?= fq.text ?></div>
+        <? if (fq.hint) { ?><div class="hint"><?= fq.hint ?></div><? } ?>
+        <? if (fq.type === 'multi') { ?>
+        <div class="radio-row" data-choice-group="<?= fq.field ?>"
+          data-min-choices="<?= fq.min_choices ?>" data-max-choices="<?= fq.max_choices ?>">
+          <? for (var m = 0; m < fq.options.length; m++) { ?>
+          <label>
+            <input type="checkbox" name="<?= fq.field ?>" value="<?= fq.options[m] ?>"><span><?= fq.options[m] ?></span>
+          </label>
+          <? } ?>
+        </div>
+        <? if (fq.other_option) { ?>
+        <!-- Без hidden в разметке намеренно: при отключённом JavaScript поле
+             осталось бы скрытым навсегда, и выбравший «Другое» не смог бы
+             ответить. Прячет его syncChoiceGroup сразу при загрузке. -->
+        <div class="sub-field" data-other-box="<?= fq.field ?>">
+          <input type="text" name="<?= fq.field ?>_other"
+            maxlength="<?= fq.other_max_length ?>" placeholder="<?= fq.other_placeholder ?>"
+            data-other-for="<?= fq.field ?>" data-other-value="<?= fq.other_option ?>">
+          <div class="field-error" data-error-for="<?= fq.field ?>_other"></div>
+        </div>
+        <? } ?>
+        <? } ?>
+        <? if (fq.type === 'single') { ?>
+        <div class="radio-row">
+          <? for (var s = 0; s < fq.options.length; s++) { ?>
+          <label>
+            <input type="radio" name="<?= fq.field ?>" value="<?= fq.options[s] ?>"><span><?= fq.options[s] ?></span>
+          </label>
+          <? } ?>
+        </div>
+        <? } ?>
+        <? if (fq.type === 'rank') { ?>
+        <div class="rank" data-rank-group="<?= fq.field ?>">
+          <? for (var r = 0; r < fq.rows.length; r++) {
+               var row = fq.rows[r]; ?>
+          <div class="rank-row">
+            <label for="<?= row.field ?>"><?= row.label ?></label>
+            <select id="<?= row.field ?>" name="<?= row.field ?>" required>
+              <option value="">—</option>
+              <? for (var p = 0; p < fq.places.length; p++) { ?>
+              <option value="<?= fq.places[p] ?>"><?= fq.places[p] ?></option>
+              <? } ?>
+            </select>
+          </div>
+          <? } ?>
+        </div>
+        <? } ?>
+        <div class="field-error" data-error-for="<?= fq.field ?>"></div>
       </div>
       <? } ?>
     </section>
 
     <section>
-      <h2>Опыт</h2>
+      <h2>Вопросы</h2>
       <? for (var j = 0; j < QUESTIONS.open_questions.length; j++) {
            var oq = QUESTIONS.open_questions[j]; ?>
       <div class="field">
         <span class="q-num"><?= oq.label ?></span>
         <div class="q-text"><?= oq.text ?></div>
-        <? if (oq.months) { ?>
-        <div class="numbers">
-          <? for (var s = 0; s < oq.months.slots.length; s++) {
-               var slot = oq.months.slots[s]; ?>
-          <div class="month-row">
-            <div class="month-name" data-month-label="<?= slot ?>"></div>
-            <input type="hidden" name="q1_<?= slot ?>_month" data-month-value="<?= slot ?>">
-            <? for (var c = 0; c < oq.months.columns.length; c++) {
-                 var col = oq.months.columns[c];
-                 var name = 'q1_' + slot + '_' + col.key; ?>
-            <div class="num-cell">
-              <label for="<?= name ?>"><?= col.label ?></label>
-              <input type="number" inputmode="numeric" step="1" min="0" max="<?= col.max ?>"
-                id="<?= name ?>" name="<?= name ?>" required>
-              <div class="field-error" data-error-for="<?= name ?>"></div>
-            </div>
-            <? } ?>
-          </div>
-          <? } ?>
-        </div>
-        <? } ?>
-        <? if (oq.metrics) { ?>
-        <div class="numbers metrics">
-          <? for (var k = 0; k < oq.metrics.length; k++) {
-               var metric = oq.metrics[k]; ?>
-          <div class="num-cell">
-            <label for="<?= metric.field ?>"><?= metric.label ?></label>
-            <input type="number" inputmode="numeric" step="1" min="0" max="<?= metric.max ?>"
-              id="<?= metric.field ?>" name="<?= metric.field ?>" required>
-            <div class="field-error" data-error-for="<?= metric.field ?>"></div>
-          </div>
-          <? } ?>
-        </div>
-        <? } ?>
         <? if (oq.text_label) { ?><div class="hint"><?= oq.text_label ?></div><? } ?>
         <textarea id="<?= oq.field ?>" name="<?= oq.field ?>" data-telemetry="<?= oq.field ?>"
+          <? if (oq.short) { ?>class="short"<? } ?>
           data-min="<?= oq.min_length || 0 ?>"
           <? if (oq.max_length) { ?>maxlength="<?= oq.max_length ?>"<? } ?>
           required></textarea>

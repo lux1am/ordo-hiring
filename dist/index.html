@@ -15,7 +15,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Анкета кандидата — B2B-продажи</title>
+<title>Анкета кандидата — удалённые продажи</title>
 <style>
   :root {
     --bg: #f5f5f4;
@@ -60,7 +60,7 @@
   .hint { color: var(--muted); font-size: 14px; font-weight: 400; margin-bottom: 8px; }
   .field { margin-bottom: 20px; }
   .field:last-child { margin-bottom: 0; }
-  input[type=text], input[type=url], input[type=number], textarea {
+  input[type=text], input[type=url], textarea, select {
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--line);
@@ -70,34 +70,15 @@
     font: inherit;
     font-size: 16px; /* меньше 16px — iOS зумит страницу при фокусе */
   }
-  input:focus, textarea:focus {
+  input:focus, textarea:focus, select:focus {
     outline: 2px solid var(--accent);
     outline-offset: -1px;
     border-color: var(--accent);
   }
   textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
-  /* Числовые блоки Q1 и Q4. Числа кандидат вводит полями, а не текстом:
-     так их не нужно вылавливать из фразы, и они сразу пригодны для сверки. */
-  .numbers { margin: 0 0 16px; }
-  .month-row {
-    display: grid;
-    grid-template-columns: 132px repeat(3, 1fr);
-    gap: 10px;
-    align-items: end;
-    margin-bottom: 10px;
-  }
-  .month-name { font-weight: 550; padding-bottom: 11px; }
-  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-  .num-cell label {
-    font-size: 13px;
-    font-weight: 400;
-    color: var(--muted);
-    margin-bottom: 5px;
-  }
-  /* Подписи колонок повторяются в каждой строке месяца — на широком экране
-     это шум, поэтому видна только первая. На узком сетка перестраивается,
-     и подписи возвращаются: там строки идут одна под другой. */
-  .month-row + .month-row .num-cell label { visibility: hidden; }
+  /* Короткие задания: ответ в одно-два предложения, и высокое поле
+     подсказывало бы кандидату писать длиннее, чем просят. */
+  textarea.short { min-height: 84px; }
   .counter { font-size: 13px; color: var(--muted); margin-top: 6px; }
   .counter.ok { color: #15803d; }
   .counter.limit { color: #c2410c; }
@@ -115,7 +96,7 @@
   .q-num { font-weight: 650; display: block; margin-bottom: 4px; }
   .radio-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .radio-row label {
-    flex: 1 1 120px;
+    flex: 1 1 150px;
     margin: 0;
     padding: 11px 14px;
     border: 1px solid var(--line);
@@ -133,8 +114,27 @@
     box-shadow: inset 0 0 0 1px var(--accent);
     background: #fafaf9;
   }
+  /* Вариант, который уже нельзя выбрать: предел в два ответа выбран. */
+  .radio-row label.off { opacity: .45; cursor: default; }
   .stop-q { padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
   .stop-q:last-child { border-bottom: 0; padding-bottom: 0; margin-bottom: 0; }
+  /* Уточнение к стоп-вопросу: часовой пояс, свой вариант ответа. */
+  .sub-field { margin-top: 12px; }
+  .sub-field label { font-size: 14px; font-weight: 400; color: var(--muted); }
+  /* Ранжирование: подпись слева, место справа. Выпадающий список узкий —
+     в нём всего четыре пункта, и растянутый на всю строку он читался бы
+     как обычное поле ввода. */
+  .rank { margin-top: 10px; }
+  .rank-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .rank-row:last-child { border-bottom: 0; }
+  .rank-row label { flex: 1; margin: 0; font-weight: 500; }
+  .rank-row select { width: 76px; flex-shrink: 0; padding: 9px 10px; }
   .consent { display: flex; gap: 10px; align-items: flex-start; }
   .consent input { margin-top: 4px; width: 18px; height: 18px; flex-shrink: 0; }
   .consent label { font-weight: 400; margin: 0; }
@@ -172,18 +172,15 @@
     section { padding: 16px; border-radius: 6px; }
     h1 { font-size: 21px; }
     .radio-row label { flex: 1 1 100%; }
-    .month-row { grid-template-columns: 1fr; gap: 8px; margin-bottom: 18px; }
-    .month-name { padding-bottom: 0; }
-    .month-row + .month-row .num-cell label { visibility: visible; }
-    .metrics { grid-template-columns: 1fr; }
+    .rank-row { gap: 8px; }
   }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>Анкета кандидата — B2B-продажи</h1>
-    <p class="intro">Отвечайте своими словами и с конкретными цифрами. Ответы без цифр и без примеров не проходят отбор. Заполнение занимает 20–30 минут.</p>
+    <h1>Анкета кандидата — удалённые продажи</h1>
+    <p class="intro">Позиция удалённая, 15–20 часов в неделю, доход полностью сдельный. Опыт продаж не обязателен. Отвечайте своими словами: короткий живой ответ ценнее длинного и гладкого. Заполнение занимает 10–15 минут.</p>
   </header>
 
   
@@ -227,7 +224,7 @@
       <h2>Условия работы</h2>
       
       <div class="stop-q">
-        <div class="q-text">Готовы работать без фиксированного оклада?</div>
+        <div class="q-text">Готовы к полностью сдельному доходу без фиксированного оклада?</div>
         <div class="radio-row">
           
           <label>
@@ -235,7 +232,97 @@
                  роль кнопки играет label. Нативная валидация на скрытом поле
                  может заблокировать отправку, не показав сообщения. Ответ
                  проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_1_oklad" value="Да"
+            <input type="radio" name="stop_1_sdelno" value="Да, полностью готов"
+              ><span>Да, полностью готов</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_1_sdelno" value="Скорее да, понимаю риски"
+              ><span>Скорее да, понимаю риски</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_1_sdelno" value="Сомневаюсь"
+              ><span>Сомневаюсь</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_1_sdelno" value="Нет, нужен оклад"
+              ><span>Нет, нужен оклад</span>
+          </label>
+          
+        </div>
+        <div class="field-error" data-error-for="stop_1_sdelno"></div>
+      </div>
+      
+      
+      <div class="stop-q">
+        <div class="q-text">Сколько часов в неделю готовы уделять работе?</div>
+        <div class="radio-row">
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_2_chasy" value="10–14"
+              ><span>10–14</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_2_chasy" value="15–19"
+              ><span>15–19</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_2_chasy" value="20–24"
+              ><span>20–24</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_2_chasy" value="25+"
+              ><span>25+</span>
+          </label>
+          
+        </div>
+        <div class="field-error" data-error-for="stop_2_chasy"></div>
+      </div>
+      
+      
+      <div class="stop-q">
+        <div class="q-text">Готовы быть на связи в будни с 11:00 до 17:00 по МСК?</div>
+        <div class="radio-row">
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_3_svyaz" value="Да"
               ><span>Да</span>
           </label>
           
@@ -244,16 +331,26 @@
                  роль кнопки играет label. Нативная валидация на скрытом поле
                  может заблокировать отправку, не показав сообщения. Ответ
                  проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_1_oklad" value="Нет"
+            <input type="radio" name="stop_3_svyaz" value="Нет"
               ><span>Нет</span>
           </label>
           
         </div>
-        <div class="field-error" data-error-for="stop_1_oklad"></div>
+        <div class="field-error" data-error-for="stop_3_svyaz"></div>
       </div>
       
       <div class="stop-q">
-        <div class="q-text">Согласны получать комиссию после завершения проекта?</div>
+        <label for="stop_3_svyaz_tz">Ваш часовой пояс</label>
+        <input type="text" id="stop_3_svyaz_tz" name="stop_3_svyaz_tz"
+          value="" required
+          maxlength="60" placeholder="например, МСК или МСК+2"
+          title="Напишите свой часовой пояс: МСК, МСК+2 или город">
+        <div class="field-error" data-error-for="stop_3_svyaz_tz"></div>
+      </div>
+      
+      
+      <div class="stop-q">
+        <div class="q-text">Какой формат оформления вам подходит?</div>
         <div class="radio-row">
           
           <label>
@@ -261,8 +358,8 @@
                  роль кнопки играет label. Нативная валидация на скрытом поле
                  может заблокировать отправку, не показав сообщения. Ответ
                  проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_2_komissiya" value="Да"
-              ><span>Да</span>
+            <input type="radio" name="stop_4_oformlenie" value="ГПХ"
+              ><span>ГПХ</span>
           </label>
           
           <label>
@@ -270,225 +367,365 @@
                  роль кнопки играет label. Нативная валидация на скрытом поле
                  может заблокировать отправку, не показав сообщения. Ответ
                  проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_2_komissiya" value="Нет"
+            <input type="radio" name="stop_4_oformlenie" value="Самозанятость"
+              ><span>Самозанятость</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_4_oformlenie" value="Не подходит ни один"
+              ><span>Не подходит ни один</span>
+          </label>
+          
+        </div>
+        <div class="field-error" data-error-for="stop_4_oformlenie"></div>
+      </div>
+      
+      
+      <div class="stop-q">
+        <div class="q-text">Есть ли у вас компьютер, гарнитура и стабильный интернет?</div>
+        <div class="radio-row">
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_5_tehnika" value="Да, всё есть"
+              ><span>Да, всё есть</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_5_tehnika" value="Частично"
+              ><span>Частично</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_5_tehnika" value="Нет"
               ><span>Нет</span>
           </label>
           
         </div>
-        <div class="field-error" data-error-for="stop_2_komissiya"></div>
+        <div class="field-error" data-error-for="stop_5_tehnika"></div>
+      </div>
+      
+      
+      <div class="stop-q">
+        <div class="q-text">Готовы к тому, что звонки записываются и разбираются на планёрках?</div>
+        <div class="radio-row">
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_6_zapis" value="Да, полностью готов"
+              ><span>Да, полностью готов</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_6_zapis" value="Скорее да"
+              ><span>Скорее да</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_6_zapis" value="Сомневаюсь"
+              ><span>Сомневаюсь</span>
+          </label>
+          
+          <label>
+            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
+                 роль кнопки играет label. Нативная валидация на скрытом поле
+                 может заблокировать отправку, не показав сообщения. Ответ
+                 проверяет сервер — см. validate() в Code.gs. -->
+            <input type="radio" name="stop_6_zapis" value="Нет"
+              ><span>Нет</span>
+          </label>
+          
+        </div>
+        <div class="field-error" data-error-for="stop_6_zapis"></div>
+      </div>
+      
+      
+    </section>
+
+    <section>
+      <h2>Мотивация и ожидания</h2>
+      
+      <div class="stop-q">
+        <div class="q-text">Почему хотите в продажи?</div>
+        <div class="hint">Выберите один или два варианта</div>
+        
+        <div class="radio-row" data-choice-group="flag_motive"
+          data-min-choices="1" data-max-choices="2">
+          
+          <label>
+            <input type="checkbox" name="flag_motive" value="Высокий доход без потолка"><span>Высокий доход без потолка</span>
+          </label>
+          
+          <label>
+            <input type="checkbox" name="flag_motive" value="Уйти на удалёнку"><span>Уйти на удалёнку</span>
+          </label>
+          
+          <label>
+            <input type="checkbox" name="flag_motive" value="Попробовать продажи впервые"><span>Попробовать продажи впервые</span>
+          </label>
+          
+          <label>
+            <input type="checkbox" name="flag_motive" value="Сменить сферу"><span>Сменить сферу</span>
+          </label>
+          
+          <label>
+            <input type="checkbox" name="flag_motive" value="Другое"><span>Другое</span>
+          </label>
+          
+        </div>
+        
+        <!-- Без hidden в разметке намеренно: при отключённом JavaScript поле
+             осталось бы скрытым навсегда, и выбравший «Другое» не смог бы
+             ответить. Прячет его syncChoiceGroup сразу при загрузке. -->
+        <div class="sub-field" data-other-box="flag_motive">
+          <input type="text" name="flag_motive_other"
+            value=""
+            maxlength="120" placeholder="Свой вариант"
+            data-other-for="flag_motive" data-other-value="Другое">
+          <div class="field-error" data-error-for="flag_motive_other"></div>
+        </div>
+        
+        
+        
+        
+        <div class="field-error" data-error-for="flag_motive"></div>
       </div>
       
       <div class="stop-q">
-        <div class="q-text">Готовы делать 120–150 касаний в неделю?</div>
+        <div class="q-text">Какой доход вы считаете реалистичным при 15–20 часах в неделю?</div>
+        
+        
+        
         <div class="radio-row">
           
           <label>
-            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
-                 роль кнопки играет label. Нативная валидация на скрытом поле
-                 может заблокировать отправку, не показав сообщения. Ответ
-                 проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_3_kasaniya" value="Да"
-              ><span>Да</span>
+            <input type="radio" name="flag_income" value="до 50 000 ₽"
+              ><span>до 50 000 ₽</span>
           </label>
           
           <label>
-            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
-                 роль кнопки играет label. Нативная валидация на скрытом поле
-                 может заблокировать отправку, не показав сообщения. Ответ
-                 проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_3_kasaniya" value="Нет"
-              ><span>Нет</span>
+            <input type="radio" name="flag_income" value="50 000–80 000 ₽"
+              ><span>50 000–80 000 ₽</span>
+          </label>
+          
+          <label>
+            <input type="radio" name="flag_income" value="80 000–120 000 ₽"
+              ><span>80 000–120 000 ₽</span>
+          </label>
+          
+          <label>
+            <input type="radio" name="flag_income" value="120 000–150 000 ₽"
+              ><span>120 000–150 000 ₽</span>
+          </label>
+          
+          <label>
+            <input type="radio" name="flag_income" value="более 150 000 ₽"
+              ><span>более 150 000 ₽</span>
           </label>
           
         </div>
-        <div class="field-error" data-error-for="stop_3_kasaniya"></div>
+        
+        
+        <div class="field-error" data-error-for="flag_income"></div>
       </div>
       
       <div class="stop-q">
-        <div class="q-text">Готовы проводить 15 квалифицированных встреч в неделю?</div>
-        <div class="radio-row">
+        <div class="q-text">Расставьте по важности от 1 до 4, где 1 — самое важное.</div>
+        
+        
+        
+        
+        <div class="rank" data-rank-group="flag_rank">
           
-          <label>
-            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
-                 роль кнопки играет label. Нативная валидация на скрытом поле
-                 может заблокировать отправку, не показав сообщения. Ответ
-                 проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_4_vstrechi" value="Да"
-              ><span>Да</span>
-          </label>
+          <div class="rank-row">
+            <label for="flag_rank_income">Высокий доход по результату</label>
+            <select id="flag_rank_income" name="flag_rank_income" required>
+              <option value="">—</option>
+              
+              <option value="1"
+                >1</option>
+              
+              <option value="2"
+                >2</option>
+              
+              <option value="3"
+                >3</option>
+              
+              <option value="4"
+                >4</option>
+              
+            </select>
+          </div>
           
-          <label>
-            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
-                 роль кнопки играет label. Нативная валидация на скрытом поле
-                 может заблокировать отправку, не показав сообщения. Ответ
-                 проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_4_vstrechi" value="Нет"
-              ><span>Нет</span>
-          </label>
+          <div class="rank-row">
+            <label for="flag_rank_schedule">Гибкий график</label>
+            <select id="flag_rank_schedule" name="flag_rank_schedule" required>
+              <option value="">—</option>
+              
+              <option value="1"
+                >1</option>
+              
+              <option value="2"
+                >2</option>
+              
+              <option value="3"
+                >3</option>
+              
+              <option value="4"
+                >4</option>
+              
+            </select>
+          </div>
+          
+          <div class="rank-row">
+            <label for="flag_rank_growth">Карьерный рост</label>
+            <select id="flag_rank_growth" name="flag_rank_growth" required>
+              <option value="">—</option>
+              
+              <option value="1"
+                >1</option>
+              
+              <option value="2"
+                >2</option>
+              
+              <option value="3"
+                >3</option>
+              
+              <option value="4"
+                >4</option>
+              
+            </select>
+          </div>
+          
+          <div class="rank-row">
+            <label for="flag_rank_stability">Стабильность</label>
+            <select id="flag_rank_stability" name="flag_rank_stability" required>
+              <option value="">—</option>
+              
+              <option value="1"
+                >1</option>
+              
+              <option value="2"
+                >2</option>
+              
+              <option value="3"
+                >3</option>
+              
+              <option value="4"
+                >4</option>
+              
+            </select>
+          </div>
           
         </div>
-        <div class="field-error" data-error-for="stop_4_vstrechi"></div>
+        
+        <div class="field-error" data-error-for="flag_rank"></div>
       </div>
       
       <div class="stop-q">
-        <div class="q-text">Готовы самостоятельно вести сделку до завершения проекта?</div>
+        <div class="q-text">Насколько достижимы 8–10 квалифицированных встреч в неделю при 15 часах работы и готовой базе?</div>
+        
+        
+        
         <div class="radio-row">
           
           <label>
-            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
-                 роль кнопки играет label. Нативная валидация на скрытом поле
-                 может заблокировать отправку, не показав сообщения. Ответ
-                 проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_5_vedenie" value="Да"
-              ><span>Да</span>
+            <input type="radio" name="flag_meetings" value="Легко достижимо"
+              ><span>Легко достижимо</span>
           </label>
           
           <label>
-            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
-                 роль кнопки играет label. Нативная валидация на скрытом поле
-                 может заблокировать отправку, не показав сообщения. Ответ
-                 проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_5_vedenie" value="Нет"
-              ><span>Нет</span>
+            <input type="radio" name="flag_meetings" value="Достижимо при усилиях"
+              ><span>Достижимо при усилиях</span>
+          </label>
+          
+          <label>
+            <input type="radio" name="flag_meetings" value="Сложно, но возможно"
+              ><span>Сложно, но возможно</span>
+          </label>
+          
+          <label>
+            <input type="radio" name="flag_meetings" value="Нереально"
+              ><span>Нереально</span>
           </label>
           
         </div>
-        <div class="field-error" data-error-for="stop_5_vedenie"></div>
+        
+        
+        <div class="field-error" data-error-for="flag_meetings"></div>
       </div>
       
       <div class="stop-q">
-        <div class="q-text">Готовы фиксировать работу в CRM и участвовать в разборах звонков?</div>
+        <div class="q-text">Кем вы хотите быть через 6–12 месяцев?</div>
+        
+        
+        
         <div class="radio-row">
           
           <label>
-            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
-                 роль кнопки играет label. Нативная валидация на скрытом поле
-                 может заблокировать отправку, не показав сообщения. Ответ
-                 проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_6_crm" value="Да"
-              ><span>Да</span>
+            <input type="radio" name="flag_goals" value="Менеджер"
+              ><span>Менеджер</span>
           </label>
           
           <label>
-            <!-- Без required намеренно: сам input скрыт стилями (.radio-row input),
-                 роль кнопки играет label. Нативная валидация на скрытом поле
-                 может заблокировать отправку, не показав сообщения. Ответ
-                 проверяет сервер — см. validate() в Code.gs. -->
-            <input type="radio" name="stop_6_crm" value="Нет"
-              ><span>Нет</span>
+            <input type="radio" name="flag_goals" value="Старший менеджер"
+              ><span>Старший менеджер</span>
+          </label>
+          
+          <label>
+            <input type="radio" name="flag_goals" value="РОП"
+              ><span>РОП</span>
+          </label>
+          
+          <label>
+            <input type="radio" name="flag_goals" value="Не знаю"
+              ><span>Не знаю</span>
           </label>
           
         </div>
-        <div class="field-error" data-error-for="stop_6_crm"></div>
+        
+        
+        <div class="field-error" data-error-for="flag_goals"></div>
       </div>
       
     </section>
 
     <section>
-      <h2>Опыт</h2>
+      <h2>Вопросы</h2>
       
       <div class="field">
         <span class="q-num">Вопрос 1</span>
-        <div class="q-text">Сколько сделок вы лично закрывали за каждый из последних трёх полных месяцев? Укажите по каждому месяцу количество завершённых проектов, полученную выручку и средний чек.</div>
-        
-        <div class="numbers">
-          
-          <div class="month-row">
-            <div class="month-name" data-month-label="m1"></div>
-            <input type="hidden" name="q1_m1_month" data-month-value="m1">
-            
-            <div class="num-cell">
-              <label for="q1_m1_deals">Сделок</label>
-              <input type="number" inputmode="numeric" step="1" min="0" max="1000"
-                id="q1_m1_deals" name="q1_m1_deals"
-                value="" required>
-              <div class="field-error" data-error-for="q1_m1_deals"></div>
-            </div>
-            
-            <div class="num-cell">
-              <label for="q1_m1_revenue">Выручка, ₽</label>
-              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
-                id="q1_m1_revenue" name="q1_m1_revenue"
-                value="" required>
-              <div class="field-error" data-error-for="q1_m1_revenue"></div>
-            </div>
-            
-            <div class="num-cell">
-              <label for="q1_m1_check">Средний чек, ₽</label>
-              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
-                id="q1_m1_check" name="q1_m1_check"
-                value="" required>
-              <div class="field-error" data-error-for="q1_m1_check"></div>
-            </div>
-            
-          </div>
-          
-          <div class="month-row">
-            <div class="month-name" data-month-label="m2"></div>
-            <input type="hidden" name="q1_m2_month" data-month-value="m2">
-            
-            <div class="num-cell">
-              <label for="q1_m2_deals">Сделок</label>
-              <input type="number" inputmode="numeric" step="1" min="0" max="1000"
-                id="q1_m2_deals" name="q1_m2_deals"
-                value="" required>
-              <div class="field-error" data-error-for="q1_m2_deals"></div>
-            </div>
-            
-            <div class="num-cell">
-              <label for="q1_m2_revenue">Выручка, ₽</label>
-              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
-                id="q1_m2_revenue" name="q1_m2_revenue"
-                value="" required>
-              <div class="field-error" data-error-for="q1_m2_revenue"></div>
-            </div>
-            
-            <div class="num-cell">
-              <label for="q1_m2_check">Средний чек, ₽</label>
-              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
-                id="q1_m2_check" name="q1_m2_check"
-                value="" required>
-              <div class="field-error" data-error-for="q1_m2_check"></div>
-            </div>
-            
-          </div>
-          
-          <div class="month-row">
-            <div class="month-name" data-month-label="m3"></div>
-            <input type="hidden" name="q1_m3_month" data-month-value="m3">
-            
-            <div class="num-cell">
-              <label for="q1_m3_deals">Сделок</label>
-              <input type="number" inputmode="numeric" step="1" min="0" max="1000"
-                id="q1_m3_deals" name="q1_m3_deals"
-                value="" required>
-              <div class="field-error" data-error-for="q1_m3_deals"></div>
-            </div>
-            
-            <div class="num-cell">
-              <label for="q1_m3_revenue">Выручка, ₽</label>
-              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
-                id="q1_m3_revenue" name="q1_m3_revenue"
-                value="" required>
-              <div class="field-error" data-error-for="q1_m3_revenue"></div>
-            </div>
-            
-            <div class="num-cell">
-              <label for="q1_m3_check">Средний чек, ₽</label>
-              <input type="number" inputmode="numeric" step="1" min="0" max="1000000000"
-                id="q1_m3_check" name="q1_m3_check"
-                value="" required>
-              <div class="field-error" data-error-for="q1_m3_check"></div>
-            </div>
-            
-          </div>
-          
-        </div>
-        
-        
-        <div class="hint">Что вы считали закрытой сделкой? По какому событию фиксировали?</div>
+        <div class="q-text">За день вы получили 20 отказов подряд. Что будете делать дальше?</div>
+        <div class="hint">Два-три предложения</div>
         <textarea id="q1_text" name="q1_text" data-telemetry="q1_text"
-          data-min="40"
+          
+          data-min="80"
           
           required></textarea>
         <div class="counter" data-counter-for="q1_text"></div>
@@ -497,12 +734,11 @@
       
       <div class="field">
         <span class="q-num">Вопрос 2</span>
-        <div class="q-text">Какой у вас был опыт outbound-продаж? Укажите: сколько холодных касаний делали в день и неделю, какие каналы использовали, сколько встреч назначали, какая была конверсия «касание → встреча», самостоятельно ли доводили сделки до оплаты.</div>
-        
-        
+        <div class="q-text">Клиент пишет: «Сейчас неактуально, скиньте информацию на почту». Напишите ваш ответ одним-двумя предложениями, чтобы сохранить контакт.</div>
         
         <textarea id="q2_text" name="q2_text" data-telemetry="q2_text"
-          data-min="80"
+          class="short"
+          data-min="40"
           
           required></textarea>
         <div class="counter" data-counter-for="q2_text"></div>
@@ -511,13 +747,12 @@
       
       <div class="field">
         <span class="q-num">Вопрос 3</span>
-        <div class="q-text">С кем вы проводили переговоры? Укажите должности участников, кто был пользователем, кто принимал решение, кто платил, и ваш средний чек. Конкретный кейс описывать не нужно — для него отдельный вопрос ниже.</div>
-        
-        
-        
+        <div class="q-text">Напишите одно сообщение для первого контакта с собственником бизнеса. Цель — назначить встречу на 15 минут.</div>
+        <div class="hint">Не больше 70 знаков. Ограничение жёсткое — счётчик показывает остаток.</div>
         <textarea id="q3_text" name="q3_text" data-telemetry="q3_text"
-          data-min="150"
-          
+          class="short"
+          data-min="0"
+          maxlength="70"
           required></textarea>
         <div class="counter" data-counter-for="q3_text"></div>
         <div class="field-error" data-error-for="q3_text"></div>
@@ -525,40 +760,11 @@
       
       <div class="field">
         <span class="q-num">Вопрос 4</span>
-        <div class="q-text">Какие показатели своей воронки вы отслеживали?</div>
-        
-        
-        <div class="numbers metrics">
-          
-          <div class="num-cell">
-            <label for="q4_conv_touch">Конверсия касание → встреча, %</label>
-            <input type="number" inputmode="numeric" step="1" min="0" max="100"
-              id="q4_conv_touch" name="q4_conv_touch"
-              value="" required>
-            <div class="field-error" data-error-for="q4_conv_touch"></div>
-          </div>
-          
-          <div class="num-cell">
-            <label for="q4_conv_deal">Конверсия встреча → оплата, %</label>
-            <input type="number" inputmode="numeric" step="1" min="0" max="100"
-              id="q4_conv_deal" name="q4_conv_deal"
-              value="" required>
-            <div class="field-error" data-error-for="q4_conv_deal"></div>
-          </div>
-          
-          <div class="num-cell">
-            <label for="q4_cycle_days">Средний цикл сделки, дней</label>
-            <input type="number" inputmode="numeric" step="1" min="0" max="3650"
-              id="q4_cycle_days" name="q4_cycle_days"
-              value="" required>
-            <div class="field-error" data-error-for="q4_cycle_days"></div>
-          </div>
-          
-        </div>
-        
-        <div class="hint">За какой период эти цифры и как вы их считали?</div>
+        <div class="q-text">Как вы организуете рабочий день при 3–4 часах работы из дома?</div>
+        <div class="hint">Два-три предложения</div>
         <textarea id="q4_text" name="q4_text" data-telemetry="q4_text"
-          data-min="40"
+          
+          data-min="80"
           
           required></textarea>
         <div class="counter" data-counter-for="q4_text"></div>
@@ -567,13 +773,12 @@
       
       <div class="field">
         <span class="q-num">Вопрос 5</span>
-        <div class="q-text">Опишите один сложный B2B-кейс: клиент, сумма, ЛПР, цикл, ключевое возражение, ваши действия и результат. До 700 знаков.</div>
-        
-        
+        <div class="q-text">Был ли у вас опыт в продажах? Если да — где, кем и сколько. Если нет — чем занимались и почему идёте в продажи.</div>
         
         <textarea id="q5_text" name="q5_text" data-telemetry="q5_text"
-          data-min="80"
-          maxlength="700"
+          
+          data-min="60"
+          
           required></textarea>
         <div class="counter" data-counter-for="q5_text"></div>
         <div class="field-error" data-error-for="q5_text"></div>
@@ -711,32 +916,9 @@ window.submitPayload = function (data) {
     return { text: shortfallText(min - length), cls: "counter" };
   }
 
-  // Месяцы вопроса 1 считает браузер, а не сборка: статическая страница
-  // собирается один раз при деплое, и зашитые в неё названия через квартал
-  // спрашивали бы уже не про последние три месяца. Сервер пересчитывает их
-  // сам и присланному значению не верит — см. normalize_month.
-  var MONTHS_RU = [
-    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
-  ];
-
-  // Последние `count` полных месяцев, самый ранний первым. Полный — значит
-  // завершившийся: про текущий месяц кандидату ещё нечего сказать.
-  function monthSlots(now, count) {
-    var out = [];
-    for (var i = 0; i < count; i++) {
-      var d = new Date(now.getFullYear(), now.getMonth() - (count - i), 1);
-      var month = d.getMonth() + 1;
-      out.push({
-        label: MONTHS_RU[d.getMonth()] + " " + d.getFullYear(),
-        value: d.getFullYear() + "-" + (month < 10 ? "0" : "") + month
-      });
-    }
-    return out;
-  }
-
   var REQUIRED_TEXT = "Заполните это поле";
   var CONSENT_REQUIRED_TEXT = "Отметьте согласие — без него анкету не отправить";
+  var PLACE_REQUIRED_TEXT = "Расставьте все четыре места";
   var FORMAT_TEXT = "Проверьте формат";
 
   var PAUSE_MS = 5000;   // пауза дольше пяти секунд не считается временем набора
@@ -839,28 +1021,13 @@ window.submitPayload = function (data) {
     }
   });
 
-  // ------------------------ Месяцы вопроса 1 -----------------------------
-
-  (function fillMonths() {
-    var labels = document.querySelectorAll("[data-month-label]");
-    if (!labels.length) return;
-    var slots = monthSlots(new Date(), labels.length);
-    Array.prototype.forEach.call(labels, function (el, i) {
-      el.textContent = slots[i].label;
-      var hidden = document.querySelector(
-        '[data-month-value="' + el.getAttribute("data-month-label") + '"]'
-      );
-      if (hidden) hidden.value = slots[i].value;
-    });
-  })();
-
   // ------------------------- Отправка ------------------------------------
 
   var form = document.getElementById("form");
   var btn = document.getElementById("submit-btn");
   var formError = document.getElementById("form-error");
 
-  var RADIO_REQUIRED_TEXT = "Выберите «Да» или «Нет»";
+  var RADIO_REQUIRED_TEXT = "Выберите один вариант";
 
   function radioGroups() {
     var groups = {};
@@ -895,6 +1062,145 @@ window.submitPayload = function (data) {
     });
   });
 
+  // ------------------- Множественный выбор -------------------------------
+  //
+  // Чекбоксы скрыты теми же стилями, что радиокнопки, поэтому required к
+  // ним неприменим: сообщение у невидимого поля браузер не покажет.
+  // Пределы выбора проверяются здесь, а сервер повторяет ту же проверку —
+  // см. validate() в Code.gs.
+
+  var CHOICE_MIN_TEXT = "Выберите хотя бы один вариант";
+  var CHOICE_MAX_TEXT = "Выберите не больше двух вариантов";
+  var OTHER_REQUIRED_TEXT = "Напишите свой вариант";
+
+  function nodes(selector) {
+    return Array.prototype.slice.call(form.querySelectorAll(selector));
+  }
+
+  function boxesIn(group) {
+    return Array.prototype.slice.call(
+      group.querySelectorAll('input[type="checkbox"]')
+    );
+  }
+
+  function chosenIn(group) {
+    return boxesIn(group).filter(function (el) { return el.checked; });
+  }
+
+  function otherInput(name) {
+    return form.querySelector('[data-other-for="' + name + '"]');
+  }
+
+  function otherChosen(group, other) {
+    var value = other.getAttribute("data-other-value");
+    return chosenIn(group).some(function (el) { return el.value === value; });
+  }
+
+  function validateChoiceGroups() {
+    var errors = {};
+    nodes("[data-choice-group]").forEach(function (group) {
+      var name = group.getAttribute("data-choice-group");
+      var min = parseInt(group.getAttribute("data-min-choices"), 10) || 0;
+      var max = parseInt(group.getAttribute("data-max-choices"), 10) || 0;
+      var chosen = chosenIn(group);
+
+      if (chosen.length < min) {
+        errors[name] = CHOICE_MIN_TEXT;
+        return;
+      }
+      if (max && chosen.length > max) {
+        errors[name] = CHOICE_MAX_TEXT;
+        return;
+      }
+
+      var other = otherInput(name);
+      if (other && otherChosen(group, other) && !normalize(other.value)) {
+        errors[other.name] = OTHER_REQUIRED_TEXT;
+      }
+    });
+    return errors;
+  }
+
+  // Выбранный предел лучше показать, чем объяснить после отправки: лишние
+  // варианты гаснут, как только набрано максимальное число ответов.
+  function syncChoiceGroup(group) {
+    var name = group.getAttribute("data-choice-group");
+    var max = parseInt(group.getAttribute("data-max-choices"), 10) || 0;
+    var count = chosenIn(group).length;
+
+    boxesIn(group).forEach(function (el) {
+      var off = !!max && !el.checked && count >= max;
+      el.disabled = off;
+      if (el.parentNode && el.parentNode.classList) {
+        el.parentNode.classList.toggle("off", off);
+      }
+    });
+
+    var other = otherInput(name);
+    if (!other) return;
+    var box = form.querySelector('[data-other-box="' + name + '"]');
+    var on = otherChosen(group, other);
+    if (box) box.hidden = !on;
+    if (!on) other.value = "";
+  }
+
+  nodes("[data-choice-group]").forEach(function (group) {
+    var name = group.getAttribute("data-choice-group");
+    boxesIn(group).forEach(function (el) {
+      el.addEventListener("change", function () {
+        syncChoiceGroup(group);
+        var errorBox = document.querySelector('[data-error-for="' + name + '"]');
+        if (errorBox) errorBox.textContent = "";
+      });
+    });
+    syncChoiceGroup(group);
+  });
+
+  // ---------------------- Ранжирование -----------------------------------
+  //
+  // Пустое место ловит required на самом select — он видим, и браузер
+  // покажет подсказку сам. Здесь проверяется только то, чего нативная
+  // валидация не знает: каждое место занято ровно один раз.
+
+  var PLACE_UNIQUE_TEXT = "Каждое место должно быть занято один раз";
+
+  function validateRankGroups() {
+    var errors = {};
+    nodes("[data-rank-group]").forEach(function (group) {
+      var name = group.getAttribute("data-rank-group");
+      var selects = Array.prototype.slice.call(group.querySelectorAll("select"));
+      var values = selects.map(function (el) { return el.value; })
+        .filter(function (v) { return v !== ""; });
+      if (values.length < selects.length) return;
+
+      var seen = {};
+      var duplicate = values.some(function (v) {
+        if (seen[v]) return true;
+        seen[v] = true;
+        return false;
+      });
+      if (duplicate) errors[name] = PLACE_UNIQUE_TEXT;
+    });
+    return errors;
+  }
+
+  nodes("[data-rank-group] select").forEach(function (el) {
+    el.addEventListener("change", function () {
+      var group = el.closest ? el.closest("[data-rank-group]") : null;
+      var name = group ? group.getAttribute("data-rank-group") : "";
+      var box = document.querySelector('[data-error-for="' + name + '"]');
+      if (box) box.textContent = "";
+    });
+  });
+
+  function merge() {
+    var out = {};
+    Array.prototype.forEach.call(arguments, function (part) {
+      Object.keys(part).forEach(function (key) { out[key] = part[key]; });
+    });
+    return out;
+  }
+
   // ------------------ нативные подсказки по-русски -----------------------
   // Язык встроенных сообщений задаёт браузер кандидата, а не страница: в
   // русской анкете всплыло бы «Please fill out this field». Поэтому текст
@@ -904,16 +1210,13 @@ window.submitPayload = function (data) {
     var v = el.validity;
     if (v.valid) return "";
     if (v.valueMissing) {
-      return el.type === "checkbox" ? CONSENT_REQUIRED_TEXT : REQUIRED_TEXT;
+      if (el.type === "checkbox") return CONSENT_REQUIRED_TEXT;
+      // Пустое место в ранжировании: единственный select в анкете.
+      if (el.type === "select-one") return PLACE_REQUIRED_TEXT;
+      return REQUIRED_TEXT;
     }
     if (v.tooShort) return "Слишком коротко: нужно хотя бы " + chars(el.minLength);
     if (v.tooLong) return "Слишком длинно: не больше " + chars(el.maxLength);
-    // Числовые поля Q1 и Q4: у браузера для них свои состояния, и без этих
-    // веток кандидат увидел бы общее «Проверьте формат».
-    if (v.badInput) return "Введите число";
-    if (v.stepMismatch) return "Только целое число, без дробной части";
-    if (v.rangeUnderflow) return "Число не может быть отрицательным";
-    if (v.rangeOverflow) return "Слишком большое число";
     return (el.getAttribute("title") || "").trim() || FORMAT_TEXT;
   }
 
@@ -964,7 +1267,15 @@ window.submitPayload = function (data) {
   function collectPayload() {
     var data = {};
     var fd = new FormData(form);
-    fd.forEach(function (value, key) { data[key] = value; });
+    // У множественного выбора одно имя и несколько значений: forEach вернул
+    // бы только последнее, поэтому такие поля собираются списком.
+    fd.forEach(function (value, key) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        data[key] = [].concat(data[key], value);
+      } else {
+        data[key] = value;
+      }
+    });
     return data;
   }
 
@@ -1018,8 +1329,12 @@ window.submitPayload = function (data) {
     e.preventDefault();
     clearErrors();
 
-    // Стоп-вопросы проверяются первыми: их браузер не проверит сам.
-    var radioErrors = validateRadioGroups();
+    // Выбор вариантов проверяется первым: скрытые радиокнопки и чекбоксы
+    // браузер не проверит сам, а несовпадение мест в ранжировании ему
+    // вовсе неизвестно.
+    var radioErrors = merge(
+      validateRadioGroups(), validateChoiceGroups(), validateRankGroups()
+    );
     if (Object.keys(radioErrors).length) {
       showErrors(radioErrors);
       return;

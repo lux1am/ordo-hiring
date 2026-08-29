@@ -10,6 +10,7 @@
 """
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -134,6 +135,7 @@ def test_headers_gs_matches_python():
 
     assert const("COL_FORM_END") == 34
     assert const("COL_FLAGS") == index_of("flags")
+    assert const("COL_AI_MARKERS") == index_of("ai_markers")
     assert const("COL_STATUS") == index_of("status")
     assert const("COL_TOTAL_SCORE") == COL_TOTAL_SCORE
     assert const("FIRST_DATA_ROW") == FIRST_DATA_ROW
@@ -143,6 +145,13 @@ def test_questions_gs_matches_json():
     questions_gs = (GS / "Questions.gs").read_text(encoding="utf-8")
     data = json.loads(re.search(r"const QUESTIONS = (\{.*\});", questions_gs, re.S).group(1))
     assert data == json.loads((ROOT / "questions.json").read_text(encoding="utf-8"))
+
+
+def test_submit_writes_the_answers_cell():
+    """AP заполняется при сабмите: в анкетной зоне A..AH ответов о мотивации нет."""
+    write = re.search(r"function writeSubmission\(.*?\n\}", CODE_GS, re.S).group(0)
+    assert "getRange(row, COL_AI_MARKERS)" in write
+    assert "packMarkers(data.profile, [])" in write
 
 
 def test_total_score_column_is_never_written():
@@ -661,67 +670,203 @@ def test_server_still_requires_stop_answers():
     """Сервер обязан ловить то, что перестал ловить браузер."""
     validate = re.search(r"function validate\(params\).*?\n\}", CODE_GS, re.S).group(0)
     assert "QUESTIONS.stop_questions" in validate
-    assert "Выберите «Да» или «Нет»" in validate
-    assert "errors[field]" in validate
+    assert "QUESTIONS.flag_questions" in validate
+    assert "validateChoice(sq, params, errors)" in validate
+
+    choice = re.search(r"function validateChoice\(.*?\n\}", CODE_GS, re.S).group(0)
+    assert "EMPTY_CHOICE_RU" in choice
+    assert "q.options.indexOf(value) === -1" in choice, "вариант мимо списка не принимается"
+
+
+def test_choice_texts_match_python():
+    """Тексты ошибок продублированы в Code.gs и должны совпадать с profile.py."""
+    from app import profile
+
+    for name in (
+        "EMPTY_CHOICE_RU", "UNKNOWN_CHOICE_RU", "EMPTY_TEXT_RU", "TOO_LONG_RU",
+        "FEW_CHOICES_RU", "MANY_CHOICES_RU", "OTHER_REQUIRED_RU",
+        "PLACE_REQUIRED_RU", "PLACE_UNIQUE_RU",
+    ):
+        assert gs_const(name).strip("\'\"") == getattr(profile, name), name
+
+    assert gs_const("STOP_SEP").strip("\'\"") == profile.STOP_SEP
+
+
+def test_profile_flag_rules_match_python():
+    """Правила флагов продублированы в Code.gs — расхождение дало бы разные
+    флаги в зависимости от того, через какую форму пришла анкета."""
+    from app import checks
+
+    assert json.loads(gs_const("MOTIVE_AVOIDANCE").replace("\'", '"')) == list(
+        checks.MOTIVE_AVOIDANCE
+    )
+    assert json.loads(gs_const("INCOME_LOW_PLACES").replace("\'", '"')) == list(
+        checks.INCOME_LOW_PLACES
+    )
+    for name in (
+        "INCOME_LOW", "INCOME_UNREAL", "MEETINGS_UNDERESTIMATE",
+        "MEETINGS_PESSIMIST", "GOALS_UNKNOWN", "RANK_INCOME", "RANK_STABILITY",
+    ):
+        assert gs_const(name).strip("\'\"") == getattr(checks, name), name
 
 
 def test_report_validity_still_called():
     """Вызов остаётся: он нужен при программной отправке."""
     assert "form.reportValidity()" in block("<script data-shared>", FORM_HTML)
 
-# --------------------------- числовые поля --------------------------------
+# ----------------------- варианты ответов ---------------------------------
 
-def expected_number_fields() -> list[str]:
-    """Имена всех числовых полей — из questions.json, а не списком в тесте."""
-    questions = json.loads((ROOT / "questions.json").read_text(encoding="utf-8"))
-    names = []
-    for q in questions["open_questions"]:
-        months = q.get("months")
-        if months:
-            for slot in months["slots"]:
-                names += [f"q1_{slot}_{c['key']}" for c in months["columns"]]
-                names.append(f"q1_{slot}_month")
-        for metric in q.get("metrics", []):
-            names.append(metric["field"])
-    return names
-
-
-def test_rendered_page_has_every_number_field():
-    """Собранная страница содержит все двенадцать полей и три скрытых месяца.
+def test_rendered_page_has_every_choice_field():
+    """Собранная страница содержит все поля выбора и ранжирования.
 
     Проверяется именно dist/index.html: в шаблонах имена полей склеиваются
-    в цикле, и буквального `name="q1_m1_deals"` там нет — а на домен
+    в цикле, и буквального `name="flag_rank_income"` там нет — а на домен
     уезжает уже развёрнутая разметка.
     """
-    for field in expected_number_fields():
-        assert f'name="{field}"' in DIST_HTML, f"в dist/index.html нет поля {field}"
-    assert DIST_HTML.count('type="number"') == 12
+    questions = json.loads((ROOT / "questions.json").read_text(encoding="utf-8"))
+
+    for sq in questions["stop_questions"]:
+        assert f'name="{sq["field"]}"' in DIST_HTML, sq["field"]
+        if sq.get("extra"):
+            assert f'name="{sq["extra"]["field"]}"' in DIST_HTML
+
+    for fq in questions["flag_questions"]:
+        if fq["type"] == "rank":
+            for row in fq["rows"]:
+                assert f'name="{row["field"]}"' in DIST_HTML, row["field"]
+            continue
+        assert f'name="{fq["field"]}"' in DIST_HTML, fq["field"]
+        if fq.get("other_option"):
+            assert f'name="{fq["field"]}_other"' in DIST_HTML
+
+
+def without_scriptlets(html: str) -> str:
+    """Скриптлеты Apps Script содержат «>» и рвут разбор тега — схлопываем."""
+    return re.sub(r"<\?.*?\?>", "X", html, flags=re.S)
 
 
 @pytest.mark.parametrize("html,name", VARIANTS, ids=VARIANT_IDS)
-def test_number_inputs_are_integer_only(html, name):
-    """Целые и неотрицательные — иначе браузер пропустит 4.5 или -3."""
-    # Скриптлеты Apps Script содержат «>» внутри себя и рвут разбор тега,
-    # поэтому сначала схлопываются в заглушку.
-    clean = re.sub(r"<\?.*?\?>", "X", html, flags=re.S)
-    tags = re.findall(r'<input type="number"[^>]*>', clean)
-    assert tags, f"{name}: числовых полей нет вовсе"
+def test_ranking_selects_have_an_empty_first_option(html, name):
+    """Без пустого варианта select считался бы заполненным сразу."""
+    assert "data-rank-group=" in html, f"{name}: нет группы ранжирования"
+    clean = without_scriptlets(html)
+    tags = re.findall(r"<select\b[^>]*>", clean)
+    assert tags, f"{name}: полей ранжирования нет вовсе"
     for tag in tags:
-        assert 'step="1"' in tag, f"{name}: числовое поле без step=1 — {tag}"
-        assert 'min="0"' in tag, f"{name}: числовое поле без min=0 — {tag}"
-        assert "max=" in tag, f"{name}: числовое поле без верхнего предела — {tag}"
-        assert "required" in tag, f"{name}: числовое поле не обязательное — {tag}"
+        assert "required" in tag, f"{name}: select без required — {tag}"
+    for body in re.findall(r"<select\b.*?</select>", clean, re.S):
+        assert '<option value="">' in body, f"{name}: место выбрано по умолчанию"
 
 
 @pytest.mark.parametrize("html,name", VARIANTS, ids=VARIANT_IDS)
-def test_month_names_come_from_the_browser(html, name):
-    """Месяцы подставляет браузер, в разметке они пустые.
+def test_multi_choice_group_declares_its_limits(html, name):
+    """Пределы выбора живут в разметке — общий JS читает их оттуда."""
+    clean = without_scriptlets(html)
+    tag = re.search(r'<div class="radio-row" data-choice-group=[^>]*>', clean, re.S)
+    assert tag, f"{name}: нет группы множественного выбора"
+    assert "data-min-choices=" in tag.group(0), name
+    assert "data-max-choices=" in tag.group(0), name
+    assert 'type="checkbox"' in html, f"{name}: множественный выбор без чекбоксов"
 
-    Статическая страница собирается один раз при деплое — зашитый в неё
-    «Май» через квартал спрашивал бы уже не про последний полный месяц.
-    """
-    assert "data-month-label=" in html, f"{name}: нет подписи месяца"
-    assert re.search(r'data-month-label="[^"]*"\s*></div>', html), (
-        f"{name}: в разметке проставлено готовое название месяца"
+
+# ------------- флаги мотивации: обе реализации на одних данных -------------
+
+node_only = pytest.mark.skipif(
+    shutil.which("node") is None, reason="нужен node для исполнения Apps Script"
+)
+
+
+def profile_flags_js() -> str:
+    """Константы, profileFlags и addFlag — всё, что нужно для запуска."""
+    start = CODE_GS.index("var MOTIVE_AVOIDANCE")
+    end = CODE_GS.index("// =========================== Валидация")
+    add_flag = re.search(r"function addFlag\(flags, flag\) \{.*?\n\}", CODE_GS, re.S)
+    assert add_flag, "в Code.gs нет функции addFlag"
+    return CODE_GS[start:end] + "\n" + add_flag.group(0)
+
+
+def run_profile_flags(profile: dict) -> list[str]:
+    script = (
+        profile_flags_js()
+        + f"\nconsole.log(JSON.stringify("
+        f"profileFlags({json.dumps(profile, ensure_ascii=False)})));\n"
     )
-    assert "monthSlots(new Date()" in html, f"{name}: месяцы не считаются в браузере"
+    r = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+@node_only
+def test_profile_flags_match_python_on_fixtures(fixture):
+    """Одна и та же анкета обязана дать одни и те же флаги в обеих формах."""
+    from app.checks import profile_flags
+
+    assert run_profile_flags(fixture["profile"]) == profile_flags(fixture["profile"]), (
+        fixture["name"]
+    )
+
+
+@node_only
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"flag_motive": ["Уйти на удалёнку"]},
+        {"flag_motive": ["Сменить сферу", "Высокий доход без потолка"]},
+        {"flag_income": "до 50 000 ₽"},
+        {"flag_income": "более 150 000 ₽"},
+        {"flag_meetings": "Легко достижимо"},
+        {"flag_meetings": "Нереально"},
+        {"flag_goals": "Не знаю"},
+        {"flag_rank": {"flag_rank_stability": "1", "flag_rank_income": "3",
+                       "flag_rank_schedule": "2", "flag_rank_growth": "4"}},
+        {},
+    ],
+)
+def test_profile_flags_match_python_on_edges(over):
+    from app.checks import profile_flags
+    from tests.conftest import CLEAN_PROFILE
+
+    profile = {**CLEAN_PROFILE, **over}
+    assert run_profile_flags(profile) == profile_flags(profile), over
+
+
+# ------------- ячейка ai_markers: обе реализации на одних данных -----------
+
+def pack_markers_js() -> str:
+    fn = re.search(r"function packMarkers\(profile, markers\) \{.*?\n\}", CODE_GS, re.S)
+    assert fn, "в Code.gs нет функции packMarkers"
+    return fn.group(0)
+
+
+def run_pack_markers(profile: dict, markers: list[str]) -> str:
+    script = (
+        pack_markers_js()
+        + f"\nconsole.log(packMarkers("
+        f"{json.dumps(profile, ensure_ascii=False)}, "
+        f"{json.dumps(markers, ensure_ascii=False)}));\n"
+    )
+    r = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+@node_only
+@pytest.mark.parametrize(
+    "markers",
+    [[], ["ровные абзацы"]],
+    ids=["без признаков", "с признаками"],
+)
+def test_pack_markers_matches_python(fixture, markers):
+    """Ячейку пишут обе формы, а читает один обработчик — формат общий."""
+    from app.profile import pack_markers, unpack_markers
+
+    js = run_pack_markers(fixture["profile"], markers)
+    assert unpack_markers(js) == unpack_markers(
+        pack_markers(fixture["profile"], markers)
+    ), fixture["name"]
+
+
+@node_only
+def test_pack_markers_of_nothing_is_an_empty_cell():
+    """Пустая ячейка, а не «{}»: в таблице это видно глазами."""
+    assert run_pack_markers({}, []) == ""

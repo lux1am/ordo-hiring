@@ -19,12 +19,12 @@ HEADERS = [
     "resume_url",      # 5  E
     "pdn_consent",     # 6  F
 
-    "stop_1_oklad",    # 7  G
-    "stop_2_komissiya",# 8  H
-    "stop_3_kasaniya", # 9  I
-    "stop_4_vstrechi", # 10 J
-    "stop_5_vedenie",  # 11 K
-    "stop_6_crm",      # 12 L
+    "stop_1_sdelno",    # 7  G
+    "stop_2_chasy",# 8  H
+    "stop_3_svyaz", # 9  I
+    "stop_4_oformlenie", # 10 J
+    "stop_5_tehnika",  # 11 K
+    "stop_6_zapis",      # 12 L
 
     "q1_text",         # 13 M
     "q2_text",         # 14 N

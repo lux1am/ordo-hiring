@@ -14,6 +14,7 @@ from HEADERS import (
 from app import pipeline
 from app.config import STATUS_DONE, STATUS_MANUAL, STATUS_NEW, STATUS_PROCESSING
 from app.models import MODEL_QKEYS, OPEN_FIELDS, STOP_FIELDS, ScorerOutput
+from tests.conftest import CLEAN_PROFILE, SHEET_STOPS
 
 FULL_SCORES = {"q1": 3, "q2": 3, "q3": 3, "q4": 3, "q5": 3}
 
@@ -21,12 +22,18 @@ FULL_SCORES = {"q1": 3, "q2": 3, "q3": 3, "q4": 3, "q5": 3}
 class FakeSheet:
     """Лист в памяти: 54 колонки, AN считается формулой и должна остаться нетронутой."""
 
-    def __init__(self, form: dict, status=STATUS_NEW, flags=""):
+    def __init__(self, form: dict, status=STATUS_NEW, flags="", profile=None):
+        from app.profile import pack_markers
+
         self.cells = [""] * 54
         for name, value in form.items():
             self.cells[HEADERS.index(name)] = value
         self.cells[HEADERS.index("status")] = status
         self.cells[HEADERS.index("flags")] = flags
+        # AP заполняется при сабмите — обработчик обязан вернуть ответы туда.
+        self.cells[HEADERS.index("ai_markers")] = pack_markers(
+            CLEAN_PROFILE if profile is None else profile, []
+        )
         self.cells[HEADERS.index("total_score")] = "=ФОРМУЛА"
         self.writes = []
         self.status_history = [status]
@@ -46,6 +53,11 @@ class FakeSheet:
         raw = self.cells[HEADERS.index("flags")]
         return [f.strip() for f in str(raw).split(",") if f.strip()]
 
+    def read_profile(self, row):
+        from app.profile import unpack_markers
+
+        return unpack_markers(self.cells[HEADERS.index("ai_markers")])[1]
+
     def write_result(self, row, scores, result):
         self.writes.append({"scores": scores, "result": result})
         if scores is not None:
@@ -59,7 +71,8 @@ class FakeSheet:
 
 
 def install(monkeypatch, sheet):
-    for fn in ("read_status", "set_status", "read_form", "read_flags", "write_result"):
+    for fn in ("read_status", "set_status", "read_form", "read_flags",
+               "read_profile", "write_result"):
         monkeypatch.setattr(pipeline.sheets, fn, getattr(sheet, fn))
     pipeline._row_locks.clear()
 
@@ -72,11 +85,7 @@ def form_data(fixture):
 
 
 def stub_model(monkeypatch, fixture, scores=None, fail=False):
-    """Подменяет скорер — сети в тестах нет.
-
-    Балл за q1 сюда не попадает: его считает checks.q1_score по числам из
-    ячейки q1_text, и подменить его фикстурой нельзя — в этом и смысл.
-    """
+    """Подменяет скорер — сети в тестах нет."""
     if fail:
         def boom(*a, **k):
             raise pipeline.ScoringFailed("модель недоступна")
@@ -92,7 +101,6 @@ def stub_model(monkeypatch, fixture, scores=None, fail=False):
     result = ScorerOutput(
         scores={k: scores[k] for k in MODEL_QKEYS},
         evidence={k: f"цитата {k}" for k in MODEL_QKEYS},
-        auto_filters=fixture["auto_filters"],
         ai_style=fixture["ai_style"],
         ai_markers=["ровные абзацы"],
         screening_questions=["вопрос 1", "вопрос 2", "вопрос 3"],
@@ -181,75 +189,6 @@ def test_scoring_failure_goes_to_manual(monkeypatch, fixtures):
     assert sheet.get("total_score") == "=ФОРМУЛА"
 
 
-def test_incomplete_months_lower_score_not_status(monkeypatch, fixtures):
-    """Пропущенный месяц — это балл 1, а не повод звать человека.
-
-    Раньше неполные числа отправляли анкету в ручную проверку: их доставал
-    из текста экстрактор, и «не нашёл» было неотличимо от «кандидат не
-    указал». Теперь поля обязательные, пустой месяц — сознательный ноль.
-    """
-    fixture = json.loads(json.dumps(fixtures[0]))
-    fixture["answers"]["q1_text"] = (
-        "Март 2026: 4 / 400000 / 100000; Апрель 2026: 0 / 0 / 0; "
-        "Май 2026: 0 / 0 / 0 — закрытой считал сделку по дате акта."
-    )
-    sheet = FakeSheet(form_data(fixture))
-    install(monkeypatch, sheet)
-    stub_model(monkeypatch, fixture)
-
-    pipeline.process_row(2)
-
-    assert sheet.get("status") == STATUS_DONE, "человека звать не за чем"
-    assert sheet.get("score_q1") == 1, "один месяц из трёх"
-    assert sheet.writes[0]["scores"] == [1, 3, 3, 3, 3]
-
-
-def test_q1_score_ignores_model(monkeypatch, fixtures):
-    """Балл за Q1 берётся из чисел, даже если модель прислала свой."""
-    fixture = json.loads(json.dumps(fixtures[0]))
-    sheet = FakeSheet(form_data(fixture))
-    install(monkeypatch, sheet)
-    # Модель «оценила» все вопросы на ноль — на q1 это не влияет.
-    stub_model(monkeypatch, fixture, scores={k: 0 for k in ["q1", "q2", "q3", "q4", "q5"]})
-
-    pipeline.process_row(2)
-
-    assert sheet.get("score_q1") == 3, "три полных месяца со стабильным чеком"
-
-
-def test_q1_definition_flag_caps_score(monkeypatch, fixtures):
-    """Без внятного определения сделки числа дают максимум 2."""
-    fixture = json.loads(json.dumps(fixtures[0]))
-    fixture["auto_filters"] = {
-        "q3_senior_dm_confirmed": True,
-        "q1_definition_ok": False,
-    }
-    sheet = FakeSheet(form_data(fixture))
-    install(monkeypatch, sheet)
-    stub_model(monkeypatch, fixture)
-
-    pipeline.process_row(2)
-
-    assert sheet.get("score_q1") == 2
-
-
-def test_hard_c_stays_c(monkeypatch, fixtures):
-    """Автофильтр Q3 объявлен безусловным и перекрывает сумму баллов."""
-    fixture = json.loads(json.dumps(fixtures[0]))
-    fixture["auto_filters"] = {
-        "q3_senior_dm_confirmed": False,
-        "q1_definition_ok": True,
-    }
-    sheet = FakeSheet(form_data(fixture))
-    install(monkeypatch, sheet)
-    stub_model(monkeypatch, fixture)
-
-    pipeline.process_row(2)
-
-    assert sheet.get("verdict") == "C"
-    assert sheet.get("status") == STATUS_DONE
-
-
 def test_result_zone_shape(monkeypatch, fixtures):
     """Зона AO..AZ ровно 12 значений и в порядке HEADERS."""
     fixture = fixtures[0]
@@ -265,7 +204,7 @@ def test_result_zone_shape(monkeypatch, fixtures):
     assert sheet.get("notified") == "", "notified — заглушка, код её не заполняет"
     evidence = json.loads(sheet.get("evidence_json"))
     assert evidence["q2"] == "цитата q2"
-    assert "q1" not in evidence, "по q1 модель цитат не даёт"
+    assert evidence["q1"] == "цитата q1", "цитата нужна по всем пяти вопросам"
     assert sheet.get("screening_questions").count("\n") == 2, "три вопроса на интервью"
 
 
@@ -292,6 +231,70 @@ def test_telemetry_flag_adds_screening_question(monkeypatch, fixtures):
     assert "вставленный текст" in sheet.get("flags_ru")
 
 
+def test_profile_survives_the_result_write(monkeypatch, fixtures):
+    """Обработчик перезаписывает AP целиком и обязан вернуть туда ответы.
+
+    Признаки машинного текста и ответы кандидата живут в одной ячейке:
+    отдельной колонки под ответы в раскладке нет. Забыть вычитать её —
+    значит молча стереть половину анкеты.
+    """
+    from app.profile import unpack_markers
+
+    fixture = fixtures[0]
+    sheet = FakeSheet(form_data(fixture), profile=fixture["profile"])
+    install(monkeypatch, sheet)
+    stub_model(monkeypatch, fixture)
+
+    pipeline.process_row(2)
+
+    markers, profile = unpack_markers(sheet.get("ai_markers"))
+    assert profile == fixture["profile"], "ответы кандидата затёрты"
+    assert markers == ["ровные абзацы"], "признаки от модели не записаны"
+
+
+def test_answers_are_readable_in_the_showcase(monkeypatch, fixtures):
+    """JSON в AP раскрывать не нужно: то же самое есть фразой в flags_ru."""
+    fixture = fixtures[0]
+    sheet = FakeSheet(form_data(fixture), profile=fixture["profile"])
+    install(monkeypatch, sheet)
+    stub_model(monkeypatch, fixture)
+
+    pipeline.process_row(2)
+
+    from app import ru
+
+    assert ru.profile_ru(fixture["profile"]) in sheet.get("flags_ru")
+
+
+def test_stop_refusal_keeps_the_answers(monkeypatch, fixtures):
+    """Ранний выход по стоп-вопросам тоже проходит через запись AO..AZ."""
+    from app.profile import unpack_markers
+
+    fixture = next(f for f in fixtures if f["expected"].get("early_exit"))
+    sheet = FakeSheet(form_data(fixture), profile=fixture["profile"])
+    install(monkeypatch, sheet)
+    monkeypatch.setattr(pipeline, "score", lambda *a, **k: pytest.fail("скорер вызван"))
+
+    pipeline.process_row(2)
+
+    assert unpack_markers(sheet.get("ai_markers"))[1] == fixture["profile"]
+
+
+def test_scorer_failure_keeps_the_answers(monkeypatch, fixtures):
+    """Ручная проверка — ровно тот случай, когда ответы нужнее всего."""
+    from app.profile import unpack_markers
+
+    fixture = fixtures[0]
+    sheet = FakeSheet(form_data(fixture), profile=fixture["profile"])
+    install(monkeypatch, sheet)
+    stub_model(monkeypatch, fixture, fail=True)
+
+    pipeline.process_row(2)
+
+    assert sheet.get("status") == STATUS_MANUAL
+    assert unpack_markers(sheet.get("ai_markers"))[1] == fixture["profile"]
+
+
 def test_form_row_shape(fixtures):
     """Зона A..AH ровно 34 значения."""
     from app.models import Submission, Telemetry
@@ -299,7 +302,8 @@ def test_form_row_shape(fixtures):
     fixture = fixtures[0]
     sub = Submission(
         fio="Иванов Иван", telegram="@ivanov", resume_url="https://hh.ru/1",
-        pdn_consent=True, stops=fixture["stops"], answers=fixture["answers"],
+        pdn_consent=True, stops=dict(SHEET_STOPS), profile=dict(CLEAN_PROFILE),
+        answers=dict(fixture["answers"]),
         telemetry=Telemetry.model_validate(fixture["telemetry"]),
     )
     row = pipeline.build_form_row(sub, "abc123")
@@ -310,18 +314,14 @@ def test_form_row_shape(fixtures):
     assert COL_TOTAL_SCORE > len(row), "зона анкеты не достаёт до формулы"
 
 
-def test_scorer_failure_never_produces_hard_c(monkeypatch, fixtures):
+def test_scorer_failure_is_never_a_refusal(monkeypatch, fixtures):
     """Сбой скорера не должен приводить к отказу.
 
-    Ручная проверка осталась ровно одна — сбой скорера. Данных по вопросу 3
-    в этом случае нет вообще, поэтому автофильтр не применяется и вердикт
-    принудительно B: иначе кандидат получал бы C за битый JSON или череду
-    429, то есть за чужую вину.
+    Ручная проверка осталась ровно одна — сбой скорера. Баллов в этом
+    случае нет вообще, и вердикт принудительно B: иначе кандидат получал
+    бы C за битый JSON или череду 429, то есть за чужую вину.
     """
-    # Берём кандидата, который при живом скорере получил бы жёсткий C.
-    fixture = next(f for f in fixtures if not f["auto_filters"]["q3_senior_dm_confirmed"])
-    assert fixture["expected"]["verdict"] == "C", "фикстура должна давать C при живом скорере"
-
+    fixture = fixtures[0]
     sheet = FakeSheet(form_data(fixture))
     install(monkeypatch, sheet)
     stub_model(monkeypatch, fixture, fail=True)
@@ -338,8 +338,8 @@ def test_scorer_failure_never_produces_hard_c(monkeypatch, fixtures):
 def test_scoring_success_never_goes_to_manual(monkeypatch, fixtures):
     """Отработавший скорер всегда даёт готовый вердикт.
 
-    Второго источника ручной проверки не осталось: числа приходят полями,
-    теряться при извлечении им негде.
+    Второго источника ручной проверки не осталось: числовых полей, на
+    которых он раньше спотыкался, в анкете больше нет.
     """
     fixture = fixtures[0]
     sheet = FakeSheet(form_data(fixture))

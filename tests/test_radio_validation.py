@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+QUESTIONS = json.loads((ROOT / "questions.json").read_text(encoding="utf-8"))
 FORM_HTML = (ROOT / "templates" / "form.html").read_text(encoding="utf-8")
 CODE_GS = (ROOT / "apps-script" / "Code.gs").read_text(encoding="utf-8")
 
@@ -19,10 +20,15 @@ pytestmark = pytest.mark.skipif(
     shutil.which("node") is None, reason="нужен node для исполнения клиентского кода"
 )
 
-STOP_FIELDS = [
-    "stop_1_oklad", "stop_2_komissiya", "stop_3_kasaniya",
-    "stop_4_vstrechi", "stop_5_vedenie", "stop_6_crm",
-]
+# Радиогруппами на странице становятся стоп-вопросы и вопросы-флаги с
+# одним вариантом ответа. Список берётся из анкеты, а не пишется здесь:
+# забытый вопрос иначе остался бы без проверки, и тест бы этого не заметил.
+RADIO_QUESTIONS = {
+    q["field"]: q["options"]
+    for q in QUESTIONS["stop_questions"]
+    + [fq for fq in QUESTIONS["flag_questions"] if fq["type"] == "single"]
+}
+STOP_FIELDS = list(RADIO_QUESTIONS)
 
 
 def shared_js() -> str:
@@ -40,8 +46,8 @@ def extract_validator() -> str:
 def run_validator(checked: dict[str, bool]) -> dict:
     """Гоняет реальный код на фейковой форме и возвращает найденные ошибки."""
     inputs = []
-    for field in STOP_FIELDS:
-        for value in ("Да", "Нет"):
+    for field, options in RADIO_QUESTIONS.items():
+        for value in options:
             inputs.append(
                 {"name": field, "checked": checked.get(field) == value}
             )
@@ -59,23 +65,28 @@ console.log(JSON.stringify(validateRadioGroups()));
     return json.loads(r.stdout)
 
 
+def first_option() -> dict:
+    return {f: options[0] for f, options in RADIO_QUESTIONS.items()}
+
+
 def test_nothing_chosen_flags_every_group():
     errors = run_validator({})
-    assert set(errors) == set(STOP_FIELDS), "должны отметиться все шесть групп"
+    assert set(errors) == set(RADIO_QUESTIONS), "должны отметиться все группы"
 
 
 def test_all_chosen_passes():
-    assert run_validator({f: "Да" for f in STOP_FIELDS}) == {}
+    assert run_validator(first_option()) == {}
 
 
-def test_mixed_answers_pass():
-    chosen = {f: ("Да" if i % 2 else "Нет") for i, f in enumerate(STOP_FIELDS)}
+def test_last_option_counts_too():
+    """Проверяется наличие выбора, а не его «правильность»."""
+    chosen = {f: options[-1] for f, options in RADIO_QUESTIONS.items()}
     assert run_validator(chosen) == {}
 
 
 @pytest.mark.parametrize("missing", STOP_FIELDS)
 def test_single_missing_group_is_pinpointed(missing):
-    chosen = {f: "Да" for f in STOP_FIELDS if f != missing}
+    chosen = {f: v for f, v in first_option().items() if f != missing}
     errors = run_validator(chosen)
     assert set(errors) == {missing}, f"ожидалась ровно одна ошибка на {missing}"
 

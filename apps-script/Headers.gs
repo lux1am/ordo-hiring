@@ -8,12 +8,12 @@ const HEADERS = [
   "telegram",
   "resume_url",
   "pdn_consent",
-  "stop_1_oklad",
-  "stop_2_komissiya",
-  "stop_3_kasaniya",
-  "stop_4_vstrechi",
-  "stop_5_vedenie",
-  "stop_6_crm",
+  "stop_1_sdelno",
+  "stop_2_chasy",
+  "stop_3_svyaz",
+  "stop_4_oformlenie",
+  "stop_5_tehnika",
+  "stop_6_zapis",
   "q1_text",
   "q2_text",
   "q3_text",
@@ -60,6 +60,7 @@ const HEADERS = [
 
 const COL_FORM_END = 34;        // AH — последняя колонка анкеты
 const COL_FLAGS = 45;             // AS
+const COL_AI_MARKERS = 42;        // AP
 const COL_STATUS = 47;            // AU
 const COL_TELEGRAM = 4;           // D
 const COL_TOTAL_SCORE = 40;        // AN — формула, не трогаем

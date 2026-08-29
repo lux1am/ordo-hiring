@@ -13,7 +13,6 @@ from app.config import (
 )
 from app.llm import client, normalize, parse_json, text_of
 from app.models import MODEL_QKEYS, ScorerOutput
-from app.numbers import parse_q1, parse_q4
 from app.retry import RetriesExhausted, call_with_backoff
 
 log = logging.getLogger(__name__)
@@ -26,41 +25,16 @@ class ScoringFailed(Exception):
 def build_prompt(answers: dict[str, str]) -> str:
     """Собирает вопросы и ответы для модели.
 
-    Ячейки q1_text и q4_text хранят числа и текст вместе, поэтому здесь они
-    разбираются обратно. Модель получает их порознь: числа отдельным
-    блоком, чтобы не вылавливать их из фразы, а текст — сам по себе. По Q1
-    балл не запрашивается вовсе, его считает checks.q1_score.
+    Числовых полей в анкете нет: все пять ответов — свободный текст, и
+    каждый уходит модели как есть, без предварительной обработки.
     """
     parts = []
     for i, q in enumerate(load_questions()["open_questions"], start=1):
-        field = q["field"]
-        raw = answers.get(field, "").strip()
-        head = f"=== Вопрос {i} ===\n{q['text']}"
-
-        if field == "q1_text":
-            _, text = parse_q1(raw)
-            parts.append(
-                f"{head}\n\n"
-                "Числа по этому вопросу кандидат вводил в отдельные поля, они "
-                "проверены отдельно — балл за вопрос 1 не ставится.\n\n"
-                f"--- Что кандидат считал закрытой сделкой ---\n{text}"
-            )
-            continue
-
-        if field == "q4_text":
-            numbers, text = parse_q4(raw)
-            parts.append(
-                f"{head}\n\n"
-                "--- Числа кандидата ---\n"
-                f"конверсия касание → встреча: {numbers.conv_touch}%\n"
-                f"конверсия встреча → оплата: {numbers.conv_deal}%\n"
-                f"средний цикл сделки: {numbers.cycle_days} дн\n\n"
-                f"--- Ответ кандидата ---\n{text}"
-            )
-            continue
-
-        parts.append(f"{head}\n\n--- Ответ кандидата ---\n{raw}")
-
+        raw = answers.get(q["field"], "").strip()
+        parts.append(
+            f"=== Вопрос {i} ===\n{q['text']}\n\n"
+            f"--- Ответ кандидата ---\n{raw}"
+        )
     return "\n\n".join(parts)
 
 

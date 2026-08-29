@@ -1,5 +1,7 @@
-"""Пороги, понижения и автофильтры."""
-from app.verdict import TELEMETRY_SCREENING_RU, decide, screening_additions
+"""Пороги и понижения вердикта."""
+import pytest
+
+from app.verdict import DOWNGRADE_FLAGS, TELEMETRY_SCREENING_RU, decide, screening_additions
 
 FULL = {"q1": 3, "q2": 3, "q3": 3, "q4": 3, "q5": 3}
 
@@ -9,12 +11,7 @@ def test_verdict_matches_fixture(fixture):
     if exp.get("scores") is None:
         return   # ранний выход по стоп-вопросам, скоринга не было
 
-    v = decide(
-        scores=exp["scores"],
-        flags=exp["flags"],
-        ai_style=fixture["ai_style"],
-        q3_senior_dm_confirmed=fixture["auto_filters"]["q3_senior_dm_confirmed"],
-    )
+    v = decide(scores=exp["scores"], flags=exp["flags"], ai_style=fixture["ai_style"])
     assert v.total == exp["total"], fixture["name"]
     assert v.verdict == exp["verdict"], fixture["name"]
 
@@ -26,7 +23,7 @@ def test_thresholds():
         for k in scores:
             scores[k] = min(3, left)
             left -= scores[k]
-        return decide(scores, [], 0, True).verdict
+        return decide(scores, [], 0).verdict
 
     assert verdict_for(15) == "A"
     assert verdict_for(12) == "A"
@@ -36,31 +33,43 @@ def test_thresholds():
     assert verdict_for(0) == "C"
 
 
-def test_downgrade_a_to_b():
-    for flags, style in ([["MATH"], 0], [[], 71]):
-        assert decide(FULL, flags, style, True).verdict == "B", (flags, style)
+@pytest.mark.parametrize("flag", sorted(DOWNGRADE_FLAGS))
+def test_downgrade_a_to_b(flag):
+    v = decide(FULL, [flag], 0)
+    assert v.verdict == "B", flag
+    assert any(DOWNGRADE_FLAGS[flag] in r for r in v.reasons)
+
+
+def test_ai_style_downgrades_too():
+    assert decide(FULL, [], 71).verdict == "B"
 
 
 def test_no_downgrade_below_a():
     """Понижение действует только на A: B при флагах остаётся B."""
     scores = {"q1": 2, "q2": 2, "q3": 2, "q4": 2, "q5": 2}   # 10 -> B
-    assert decide(scores, ["PASTED", "MATH"], 90, True).verdict == "B"
+    assert decide(scores, ["PASTED", "STABILITY_FIRST"], 90).verdict == "B"
 
 
 def test_ai_style_boundary():
-    assert decide(FULL, [], 70, True).verdict == "A", "ровно 70 — ещё не понижение"
-    assert decide(FULL, [], 71, True).verdict == "B"
+    assert decide(FULL, [], 70).verdict == "A", "ровно 70 — ещё не понижение"
+    assert decide(FULL, [], 71).verdict == "B"
 
 
 def test_other_flags_do_not_downgrade():
-    """Понижают только MATH и высокий ai_style."""
-    for flag in ("PASTED", "SUSPICIOUS", "TAB_SWITCH", "OUTLIER", "MOBILE"):
-        assert decide(FULL, [flag], 0, True).verdict == "A", flag
+    """Понижают только флаги из DOWNGRADE_FLAGS и высокий ai_style."""
+    quiet = (
+        "PASTED", "SUSPICIOUS", "TAB_SWITCH", "MOBILE",
+        "INCOME_LOW", "INCOME_NOT_PRIORITY", "UNDERESTIMATE",
+        "PESSIMIST", "NO_GOALS",
+    )
+    for flag in quiet:
+        assert flag not in DOWNGRADE_FLAGS, flag
+        assert decide(FULL, [flag], 0).verdict == "A", flag
 
 
 def test_telemetry_never_downgrades():
     """Как заполняли — не оценка. Даже все три флага сразу оставляют A."""
-    v = decide(FULL, ["PASTED", "SUSPICIOUS", "TAB_SWITCH"], 0, True)
+    v = decide(FULL, ["PASTED", "SUSPICIOUS", "TAB_SWITCH"], 0)
     assert v.verdict == "A"
     assert v.reasons == [], "понижения не было — писать в причины нечего"
 
@@ -76,13 +85,6 @@ def test_telemetry_adds_screening_question():
 
 
 def test_non_telemetry_flags_add_nothing():
-    for flag in ("MATH", "OUTLIER", "MOBILE"):
+    for flag in ("MOBILE", "STABILITY_FIRST", "NO_GOALS"):
         assert screening_additions([flag]) == [], flag
     assert screening_additions([]) == []
-
-
-def test_q3_autofilter_overrides_everything():
-    v = decide(FULL, [], 0, q3_senior_dm_confirmed=False)
-    assert v.verdict == "C"
-    assert v.total == 15, "сумма сохраняется, меняется только вердикт"
-    assert any("автофильтру" in r for r in v.reasons)

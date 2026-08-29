@@ -1,0 +1,91 @@
+{
+  "name": "Стабильность на первом месте: A понижается до B",
+  "stops": {
+    "stop_1_sdelno": "Да, полностью готов",
+    "stop_2_chasy": "15–19",
+    "stop_3_svyaz": "Да — Ваш часовой пояс: МСК",
+    "stop_4_oformlenie": "ГПХ",
+    "stop_5_tehnika": "Да, всё есть",
+    "stop_6_zapis": "Скорее да"
+  },
+  "answers": {
+    "q1_text": "Посмотрю, на каком шаге срываются: если отказ идёт сразу после приветствия, значит проблема в первой фразе. Поменяю первое предложение и сегмент — начну со стоматологий, а не с ремонта. Норму на день добью.",
+    "q2_text": "Отправлю, конечно. Подскажите, к какой задаче вернётесь и когда — тогда пришлю не общую презентацию, а по вашему случаю. Готов созвониться на 15 минут в четверг.",
+    "q3_text": "Иван, за 15 минут покажу, как снизить цену заявки. Когда удобно?",
+    "q4_text": "Работаю с 10 до 13 по будням. С 10 до 11:30 звонки по холодной базе, потом полчаса на переписку и подтверждение встреч, последние сорок минут — разбор договорённостей и подготовка списка на завтра.",
+    "q5_text": "Три года в оптовых продажах стройматериалов, менеджер по работе с дилерами: вёл 40 клиентов по Северо-Западу, отвечал за отгрузки и дебиторку, сам искал новых через холодные звонки."
+  },
+  "profile": {
+    "flag_motive": [
+      "Высокий доход без потолка"
+    ],
+    "flag_income": "80 000–120 000 ₽",
+    "flag_rank": {
+      "flag_rank_stability": "1",
+      "flag_rank_schedule": "2",
+      "flag_rank_growth": "3",
+      "flag_rank_income": "4"
+    },
+    "flag_meetings": "Достижимо при усилиях",
+    "flag_goals": "РОП"
+  },
+  "telemetry": {
+    "is_mobile": false,
+    "tab_switches": 2,
+    "total_time_sec": 900,
+    "fields": {
+      "q1_text": {
+        "length": 200,
+        "pasted_chars": 0,
+        "speed_cpm": 160,
+        "backspaces": 25,
+        "away_before_input_sec": 0
+      },
+      "q2_text": {
+        "length": 200,
+        "pasted_chars": 0,
+        "speed_cpm": 160,
+        "backspaces": 25,
+        "away_before_input_sec": 0
+      },
+      "q3_text": {
+        "length": 200,
+        "pasted_chars": 0,
+        "speed_cpm": 160,
+        "backspaces": 25,
+        "away_before_input_sec": 0
+      },
+      "q4_text": {
+        "length": 200,
+        "pasted_chars": 0,
+        "speed_cpm": 160,
+        "backspaces": 25,
+        "away_before_input_sec": 0
+      },
+      "q5_text": {
+        "length": 200,
+        "pasted_chars": 0,
+        "speed_cpm": 160,
+        "backspaces": 25,
+        "away_before_input_sec": 0
+      }
+    }
+  },
+  "ai_style": 20,
+  "expected": {
+    "scores": {
+      "q1": 3,
+      "q2": 3,
+      "q3": 3,
+      "q4": 3,
+      "q5": 3
+    },
+    "total": 15,
+    "verdict": "B",
+    "status": "done",
+    "flags": [
+      "STABILITY_FIRST",
+      "INCOME_NOT_PRIORITY"
+    ]
+  }
+}

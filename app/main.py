@@ -26,10 +26,10 @@ from app.config import (
     missing_secrets,
     setup_logging,
 )
-from app.checks import telemetry_flags
-from app.models import OPEN_FIELDS, STOP_FIELDS, Submission, Telemetry
-from app.numbers import validate_q1, validate_q4
-from app.pipeline import build_form_row, build_result_row, new_id, now_local, process_row
+from app.checks import profile_flags, stop_failures, telemetry_flags
+from app.models import OPEN_FIELDS, Submission, Telemetry
+from app.profile import pack_markers, validate_profile, validate_stops
+from app.pipeline import build_form_row, build_result_row, new_id, process_row
 from app import ru
 
 setup_logging()
@@ -137,7 +137,10 @@ def _thanks(request: Request):
 
 @app.post("/submit", response_class=HTMLResponse)
 async def submit(request: Request, background: BackgroundTasks):
-    raw = dict(await request.form())
+    # Форма нужна целиком, а не словарём: у множественного выбора одно имя
+    # и несколько значений, и dict() оставил бы только последнее.
+    form = await request.form()
+    raw = dict(form)
     ip = ratelimit.client_ip(request)
 
     # Приманка для ботов: поле скрыто стилями, человек его не видит.
@@ -161,15 +164,15 @@ async def submit(request: Request, background: BackgroundTasks):
         log.warning("телеметрия не разобралась, продолжаю с пустой")
         telemetry = Telemetry()
 
-    # Числа проверяются до анкеты: ошибку про конкретное поле нужно вернуть
-    # с его именем, чтобы форма показала её под этим полем.
-    today = now_local().date()
-    q1_numbers, number_errors = validate_q1(raw, today)
-    q4_numbers, q4_errors = validate_q4(raw)
-    number_errors.update(q4_errors)
-    if number_errors:
-        log.info("числовые поля не прошли проверку: %s", number_errors)
-        return _render_error(request, number_errors, raw)
+    # Стоп-вопросы и вопросы-флаги проверяются до анкеты: ошибку про
+    # конкретный вариант нужно вернуть с именем его поля, чтобы форма
+    # показала её под этим вопросом.
+    stops, choice_errors = validate_stops(form)
+    profile, profile_errors = validate_profile(form)
+    choice_errors.update(profile_errors)
+    if choice_errors:
+        log.info("варианты ответов не прошли проверку: %s", choice_errors)
+        return _render_error(request, choice_errors, raw)
 
     try:
         sub = Submission(
@@ -177,11 +180,10 @@ async def submit(request: Request, background: BackgroundTasks):
             telegram=str(raw.get("telegram", "")),
             resume_url=str(raw.get("resume_url", "")),
             pdn_consent=bool(raw.get("pdn_consent")),
-            stops={f: str(raw[f]) for f in STOP_FIELDS if raw.get(f)},
+            stops=stops,
+            profile=profile,
             answers={f: str(raw.get(f, "")) for f in OPEN_FIELDS},
             telemetry=telemetry,
-            q1_numbers=q1_numbers,
-            q4_numbers=q4_numbers,
         )
     except ValidationError as e:
         errors = _errors_by_field(e)
@@ -189,7 +191,10 @@ async def submit(request: Request, background: BackgroundTasks):
         return _render_error(request, errors, raw)
 
     submission_id = new_id()
-    flags = telemetry_flags(sub)
+    flags = telemetry_flags(sub) + profile_flags(sub.profile)
+    # Ответы о мотивации кладём в AP сразу: отдельной колонки под них нет, а
+    # обработчик их уже не увидит — в анкетной зоне A..AH их не бывает.
+    markers = pack_markers(sub.profile, [])
     values = build_form_row(sub, submission_id)
 
     # Логируем payload до записи: диск Render не переживает рестарт, а логи
@@ -207,21 +212,29 @@ async def submit(request: Request, background: BackgroundTasks):
         row = sheets.allocate_row()
         if duplicate:
             log.warning("строка %d: дубль по телеграму %s, модель не вызываем", row, sub.telegram)
-            sheets.write_form(row, values, ", ".join(flags), status=STATUS_DUPLICATE)
+            sheets.write_form(
+                row, values, ", ".join(flags),
+                status=STATUS_DUPLICATE, markers=markers,
+            )
             sheets.write_result(
                 row,
                 scores=None,
                 result=build_result_row(
                     flags=flags,
+                    profile=sub.profile,
                     status=STATUS_DUPLICATE,
-                    conditions=ru.conditions_ru(sub.rejected_conditions()),
+                    conditions=ru.conditions_ru(stop_failures(sub.stops)),
                     decision="Повторная анкета",
-                    flags_text=ru.flags_ru(flags, [f"анкета с {sub.telegram} уже есть в таблице"]),
+                    flags_text=ru.flags_ru(
+                        flags,
+                        [f"анкета с {sub.telegram} уже есть в таблице"],
+                        sub.profile,
+                    ),
                 ),
             )
             return _thanks(request)
 
-        sheets.write_form(row, values, ", ".join(flags))
+        sheets.write_form(row, values, ", ".join(flags), markers=markers)
     except Exception:
         log.exception("анкета %s: не удалось записать в таблицу", submission_id)
         return _render_error(

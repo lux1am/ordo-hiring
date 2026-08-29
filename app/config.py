@@ -24,14 +24,8 @@ SPEED_CPM_THRESHOLD_DESKTOP = float(os.getenv("SPEED_CPM_THRESHOLD_DESKTOP", "40
 SPEED_CPM_THRESHOLD_MOBILE = float(os.getenv("SPEED_CPM_THRESHOLD_MOBILE", "700"))
 SUSPICIOUS_MIN_LENGTH = int(os.getenv("SUSPICIOUS_MIN_LENGTH", "400"))
 TAB_AWAY_SECONDS_THRESHOLD = float(os.getenv("TAB_AWAY_SECONDS_THRESHOLD", "60"))
-MATH_TOLERANCE = float(os.getenv("MATH_TOLERANCE", "0.10"))
-CONVERSION_OUTLIER_THRESHOLD = float(os.getenv("CONVERSION_OUTLIER_THRESHOLD", "50"))
 AI_STYLE_DOWNGRADE_THRESHOLD = int(os.getenv("AI_STYLE_DOWNGRADE_THRESHOLD", "70"))
 EVIDENCE_MAX_WORDS = int(os.getenv("EVIDENCE_MAX_WORDS", "15"))
-# Балл 3 за Q1: не меньше трёх сделок в каждом месяце и средние чеки в одном
-# диапазоне — максимум не выше двойного минимума.
-Q1_STABLE_MIN_DEALS = int(os.getenv("Q1_STABLE_MIN_DEALS", "3"))
-Q1_CHECK_SPREAD_MAX = float(os.getenv("Q1_CHECK_SPREAD_MAX", "2"))
 
 # --- Пороги вердикта ------------------------------------------------------
 VERDICT_A_MIN = int(os.getenv("VERDICT_A_MIN", "12"))

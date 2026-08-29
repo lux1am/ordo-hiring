@@ -17,8 +17,8 @@ from app.config import (
     STATUS_PROCESSING,
     TZ_OFFSET_HOURS,
 )
-from app.models import MODEL_QKEYS, OPEN_FIELDS, QKEYS, STOP_FIELDS, Submission
-from app.numbers import parse_q1, parse_q4
+from app.models import OPEN_FIELDS, QKEYS, STOP_FIELDS, Submission
+from app.profile import pack_markers
 from app.recovery import mark_claimed, mark_released
 from app.scorer import ScoringFailed, score
 from app.verdict import decide, screening_additions
@@ -72,6 +72,7 @@ def build_result_row(
     *,
     ai_style=None,
     ai_markers=None,
+    profile=None,
     evidence=None,
     screening=None,
     flags=None,
@@ -82,10 +83,15 @@ def build_result_row(
     ai_text="",
     flags_text="",
 ) -> list:
-    """12 значений для зоны AO..AZ, строго в порядке HEADERS."""
+    """12 значений для зоны AO..AZ, строго в порядке HEADERS.
+
+    В ai_markers (AP) едут две вещи сразу: признаки машинного текста от
+    модели и ответы кандидата на вопросы о мотивации. Отдельной колонки под
+    ответы в раскладке нет, а терять их нельзя — см. profile.pack_markers.
+    """
     return [
         "" if ai_style is None else ai_style,
-        ", ".join(ai_markers or []),
+        pack_markers(profile, ai_markers),
         json.dumps(evidence, ensure_ascii=False) if evidence else "",
         "\n".join(screening or []),
         ", ".join(flags or []),
@@ -152,12 +158,15 @@ def _process(row: int) -> str:
     form = sheets.read_form(row)
     answers = {f: str(form.get(f, "")).strip() for f in OPEN_FIELDS}
     stops = {f: str(form.get(f, "")).strip() for f in STOP_FIELDS}
-    # Флаги телеметрии записаны в AS ещё при сабмите — вычитываем и сливаем
-    # со своими. Без этого запись зоны AO..AZ затёрла бы MOBILE и PASTED.
+    # Флаги телеметрии и вопросов-флагов записаны в AS ещё при сабмите —
+    # вычитываем и сливаем со своими. Без этого запись зоны AO..AZ затёрла
+    # бы MOBILE, PASTED и всё, что дали вопросы о мотивации.
     flags = sheets.read_flags(row)
-    rejected = [f for f in STOP_FIELDS if stops.get(f) == "Нет"]
+    profile = sheets.read_profile(row)
+    rejected = checks.stop_failures(stops)
 
-    # 1. Стоп-вопросы. Любое «Нет» — отказ без единого обращения к модели.
+    # 1. Стоп-вопросы. Любой непроходной вариант — отказ без единого
+    # обращения к модели.
     if rejected:
         conditions = ru.conditions_ru(rejected)
         log.info("строка %d: отказ по стоп-вопросам — %s", row, conditions)
@@ -166,72 +175,52 @@ def _process(row: int) -> str:
             scores=None,
             result=build_result_row(
                 flags=flags,
+                profile=profile,
                 verdict="C",
                 status=STATUS_DONE,
                 conditions=conditions,
                 decision=ru.decision_ru("C"),
                 ai_text="Стиль ИИ не оценивался",
-                flags_text=ru.flags_ru(flags, ["отказ по условиям работы"]),
+                flags_text=ru.flags_ru(flags, ["отказ по условиям работы"], profile),
             ),
         )
         return STATUS_DONE
 
     conditions = ru.conditions_ru([])
 
-    # 2. Числа Q1 и Q4 разбираются из ячеек — кандидат вводил их полями,
-    # так что здесь только арифметика, без обращения к модели.
-    q1_numbers, _ = parse_q1(answers.get("q1_text", ""))
-    q4_numbers, _ = parse_q4(answers.get("q4_text", ""))
-    for f in checks.numeric_flags(q1_numbers, q4_numbers):
-        if f not in flags:
-            flags.append(f)
-
-    # 3. Скоринг.
+    # 2. Скоринг. Все пять баллов ставит модель: числовых полей, которые
+    # можно было бы посчитать кодом, в анкете больше нет.
     try:
         result, zeroed = score(answers)
     except ScoringFailed as e:
-        # Данных по вопросу 3 нет вообще, поэтому автофильтр здесь не
-        # применяется: отказ из-за битого JSON или череды 429 был бы отказом
-        # за чужую вину. Управление до decide() не доходит, вердикт — B.
         log.error("строка %d: скоринг не удался — %s", row, e)
         _write_manual(
             row,
             flags=flags,
+            profile=profile,
             conditions=conditions,
             reasons=[SCORER_FAILED_RU, f"техническая причина: {e}"],
         )
         return STATUS_MANUAL
 
-    # 4. Балл за Q1 — арифметика по числам из формы. Модель судит только о
-    # текстовой части: понятно ли, что кандидат считал закрытой сделкой.
-    all_scores = dict(result.scores)
-    all_scores["q1"] = checks.q1_score(
-        q1_numbers, result.auto_filters.q1_definition_ok
-    )
+    # 3. Вердикт. Понижают A только флаги мотивации и высокий стиль ИИ.
+    v = decide(scores=result.scores, flags=flags, ai_style=result.ai_style)
 
-    # 5. Вердикт.
-    v = decide(
-        scores=all_scores,
-        flags=flags,
-        ai_style=result.ai_style,
-        q3_senior_dm_confirmed=result.auto_filters.q3_senior_dm_confirmed,
-    )
-
-    scores = [all_scores[k] for k in QKEYS]
+    scores = [result.scores[k] for k in QKEYS]
     reasons = v.reasons + zeroed
     # Телеметрия не понижает вердикт, а даёт четвёртый вопрос на интервью.
     screening = result.screening_questions + screening_additions(flags)
 
     # Отсюда анкета всегда выходит с готовым вердиктом. Единственный путь в
     # ручную проверку — сбой скорера, он обрабатывается выше и до этого
-    # места не доходит: раньше сюда приводило ещё и неудачное извлечение
-    # чисел из текста, но числа теперь приходят полями и не теряются.
+    # места не доходит.
     sheets.write_result(
         row,
         scores=scores,
         result=build_result_row(
             ai_style=result.ai_style,
             ai_markers=result.ai_markers,
+            profile=profile,
             evidence=result.evidence,
             screening=screening,
             flags=flags,
@@ -240,7 +229,7 @@ def _process(row: int) -> str:
             conditions=conditions,
             decision=ru.decision_ru(v.verdict),
             ai_text=ru.ai_ru(result.ai_style, result.ai_markers),
-            flags_text=ru.flags_ru(flags, reasons),
+            flags_text=ru.flags_ru(flags, reasons, profile),
         ),
     )
     log.info(
@@ -249,18 +238,21 @@ def _process(row: int) -> str:
     return STATUS_DONE
 
 
-def _write_manual(row: int, *, flags: list[str], conditions: str, reasons: list[str]) -> None:
+def _write_manual(
+    row: int, *, flags: list[str], profile: dict, conditions: str, reasons: list[str]
+) -> None:
     """Ручная проверка без баллов: модель не отработала."""
     sheets.write_result(
         row,
         scores=None,
         result=build_result_row(
             flags=flags,
+            profile=profile,
             verdict="B",
             status=STATUS_MANUAL,
             conditions=conditions,
             decision=ru.decision_ru("B", is_manual=True),
             ai_text="Стиль ИИ не оценивался",
-            flags_text=ru.flags_ru(flags, reasons),
+            flags_text=ru.flags_ru(flags, reasons, profile),
         ),
     )

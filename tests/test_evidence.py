@@ -12,7 +12,6 @@ def make(evidence: dict, scores=None) -> ScorerOutput:
     return ScorerOutput(
         scores=scores or {k: 3 for k in MODEL_QKEYS},
         evidence={k: evidence.get(k, "") for k in MODEL_QKEYS},
-        auto_filters={"q3_senior_dm_confirmed": True, "q1_definition_ok": True},
         ai_style=10,
         ai_markers=[],
         screening_questions=["а", "б", "в"],
@@ -20,8 +19,8 @@ def make(evidence: dict, scores=None) -> ScorerOutput:
 
 
 def answers(q2=ANSWER):
-    # Проверяется судьба q2: балл за q1 модель больше не ставит, и цитат по
-    # нему не даёт — его считает checks.q1_score по числам из формы.
+    # Проверяется судьба q2. Остальные ответы пустые намеренно: цитате там
+    # взяться неоткуда, и баллы по ним обнуляются — так и задумано.
     return {"q1_text": "", "q2_text": q2, "q3_text": "", "q4_text": "", "q5_text": ""}
 
 
@@ -79,12 +78,12 @@ def test_schema_rejects_bad_output():
     with pytest.raises(ValidationError):   # не хватает вопроса
         ScorerOutput(
             scores={"q1": 1}, evidence={"q1": "x"},
-            auto_filters={}, ai_style=10, screening_questions=["а", "б", "в"],
+            ai_style=10, screening_questions=["а", "б", "в"],
         )
 
     with pytest.raises(ValidationError):   # не три вопроса на интервью
-        make({}) .model_copy(update={"screening_questions": ["а"]}) and ScorerOutput(
+        ScorerOutput(
             scores={k: 0 for k in ["q1","q2","q3","q4","q5"]},
             evidence={k: "" for k in ["q1","q2","q3","q4","q5"]},
-            auto_filters={}, ai_style=10, screening_questions=["а", "б"],
+            ai_style=10, screening_questions=["а", "б"],
         )

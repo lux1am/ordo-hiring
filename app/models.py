@@ -1,15 +1,13 @@
 """Pydantic-схемы: телеметрия, форма, ответ скорера."""
 import re
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.config import load_questions
-from app.numbers import Q1Numbers, Q4Numbers, format_q1, format_q4
 
-YES = "Да"
-NO = "Нет"
 STOP_FIELDS = [q["field"] for q in load_questions()["stop_questions"]]
+FLAG_FIELDS = [q["field"] for q in load_questions()["flag_questions"]]
 OPEN_FIELDS = [q["field"] for q in load_questions()["open_questions"]]
 
 
@@ -65,23 +63,24 @@ URL_RE = re.compile(r"^https?://\S+\.\S+", re.IGNORECASE)
 class Submission(BaseModel):
     """Провалидированная анкета. Собирается из тела POST /submit.
 
-    Числа Q1 и Q4 приходят готовыми объектами: их проверяет numbers.py ещё
-    в обработчике, потому что ошибку про конкретное числовое поле нужно
-    показать под этим полем, а pydantic назвал бы виноватой всю анкету.
-    Здесь они склеиваются с текстовым ответом в одну ячейку — колонки
-    таблицы прежние.
+    Ответы на стоп-вопросы и вопросы-флаги приходят сюда уже разобранными:
+    их проверяет profile.py ещё в обработчике, потому что ошибку про
+    конкретный вариант нужно показать под этим вопросом, а pydantic назвал
+    бы виноватой всю анкету. Здесь они проверяются повторно, но только на
+    полноту — это вторая линия, не замена.
+
+    В `stops` лежит текст ячейки целиком: у стоп-вопроса про часовой пояс
+    к варианту приписано уточнение, см. profile.format_stop. Сравнивать
+    ответ с проходным набором нужно через profile.stop_option.
     """
     fio: str
     telegram: str
     resume_url: str
     pdn_consent: bool
-    stops: dict[str, Literal["Да", "Нет"]]
+    stops: dict[str, str]
+    profile: dict = Field(default_factory=dict)
     answers: dict[str, str]
     telemetry: Telemetry
-    q1_numbers: Q1Numbers | None = None
-    q4_numbers: Q4Numbers | None = None
-
-    model_config = {"arbitrary_types_allowed": True}
 
     @field_validator("fio")
     @classmethod
@@ -122,8 +121,7 @@ class Submission(BaseModel):
 
     @model_validator(mode="after")
     def _completeness(self):
-        missing = [f for f in STOP_FIELDS if f not in self.stops]
-        if missing:
+        if [f for f in STOP_FIELDS if not str(self.stops.get(f, "")).strip()]:
             raise ValueError("Ответьте на все вопросы об условиях работы")
 
         limits = {q["field"]: q for q in load_questions()["open_questions"]}
@@ -141,52 +139,22 @@ class Submission(BaseModel):
             if hi and len(text) > hi:
                 raise ValueError(f"{limits[f]['label']}: не больше {hi} знаков")
             self.answers[f] = text
-
-        # Длина проверена по тексту, который писал кандидат, и только теперь
-        # к нему спереди приписываются числа: иначе минимум в 40 знаков
-        # набирался бы одними цифрами из соседних полей.
-        #
-        # Числа необязательны намеренно: без них анкета собирается из одного
-        # текста, и подставить вместо пропущенных полей нули — молча
-        # записать кандидату результат, которого он не заявлял.
-        if self.q1_numbers is not None:
-            self.answers["q1_text"] = format_q1(self.q1_numbers, self.answers["q1_text"])
-        if self.q4_numbers is not None:
-            self.answers["q4_text"] = format_q4(self.q4_numbers, self.answers["q4_text"])
         return self
-
-    def has_stop_no(self) -> bool:
-        return any(v == NO for v in self.stops.values())
-
-    def rejected_conditions(self) -> list[str]:
-        """Поля стоп-вопросов, на которые ответили «Нет»."""
-        return [f for f in STOP_FIELDS if self.stops.get(f) == NO]
 
 
 # =========================== ОТВЕТ СКОРЕРА ================================
 
 Score = Annotated[int, Field(ge=0, le=3)]
 
-# Порядок баллов в таблице — колонки AI..AM, все пять вопросов.
+# Порядок баллов в таблице — колонки AI..AM, все пять вопросов. Числовых
+# полей в анкете больше нет, поэтому все пять баллов ставит модель.
 QKEYS = ["q1", "q2", "q3", "q4", "q5"]
-# Что из этого оценивает модель. Балл за Q1 считает checks.q1_score по
-# числам из формы: там нечего трактовать, а детерминированный балл ещё и
-# воспроизводится при разборе спорной анкеты.
-MODEL_QKEYS = ["q2", "q3", "q4", "q5"]
-
-
-class AutoFilters(BaseModel):
-    """Факты, которые модель обязана констатировать явно — на них висят автофильтры."""
-    q3_senior_dm_confirmed: bool = False
-    # Понятно ли из текста Q1, что кандидат считал закрытой сделкой. Без
-    # этого балл за Q1 упирается в двойку: цифры без определения нечитаемы.
-    q1_definition_ok: bool = False
+MODEL_QKEYS = QKEYS
 
 
 class ScorerOutput(BaseModel):
     scores: dict[str, Score]
     evidence: dict[str, str]
-    auto_filters: AutoFilters
     ai_style: Annotated[int, Field(ge=0, le=100)]
     ai_markers: list[str] = Field(default_factory=list)
     screening_questions: list[str]
