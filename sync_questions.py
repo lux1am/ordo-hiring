@@ -14,9 +14,10 @@ A1. Смена фамилии в списке мгновенно перестр�
 кандидатом.
 
 Скрипт заодно собирает листы учёта размещений — «Каналы», «Размещения»,
-«Личные касания» и «Эффективность», см. placements.py, — убирает прежнюю
+«Личные касания» и «Эффективность», см. placements.py, — и скрытую выгрузку
+для внешнего бота «Сводка для Поли», см. digest.py. Он же убирает прежнюю
 затею (лист «Вопросы» и примечания к шапке «Данных») и приводит в порядок
-видимость листов: склад прячет, рабочие листы показывает.
+видимость листов: склад и выгрузку прячет, рабочие листы показывает.
 
 Скрипт идемпотентный: карточка собирается заново поверх прежней, а не
 дополняется. Выбранная в A1 фамилия при пересборке сохраняется. В листах
@@ -48,11 +49,13 @@ import sys
 import gspread
 from gspread.utils import ValidationConditionType
 
+import digest
 import placements
 from HEADERS import FIRST_DATA_ROW, HEADERS, col_letter, index_of
 from app import checks, ru, sheets
 from app.config import (
     CHANNELS_SHEET,
+    DIGEST_SHEET,
     EFFICIENCY_SHEET,
     OUTREACH_SHEET,
     PLACEMENTS_SHEET,
@@ -76,7 +79,9 @@ OLD_SHEET_TITLE = "Вопросы"
 
 # Видимость листов в конце прогона. «Данные» и архив — склад, в них лазают
 # по делу; остальное читает и заполняет человек, и прятаться этому незачем.
-HIDDEN_SHEETS = (WORKSHEET_NAME, ARCHIVE_TITLE)
+# «Сводка для Поли» тоже скрыта, но по другой причине: её читает бот, а не
+# человек, и в книге она только мешалась бы — см. digest.py.
+HIDDEN_SHEETS = (WORKSHEET_NAME, ARCHIVE_TITLE, DIGEST_SHEET)
 VISIBLE_SHEETS = (
     "Кандидаты",
     CARD_TITLE,
@@ -619,6 +624,7 @@ def sync() -> str:
     )
 
     placements.sync(book)
+    digest.sync(book)
 
     set_visibility(book)
     return export_url(card.id, len(values))
@@ -633,6 +639,7 @@ def dry_run() -> None:
         print(f"{i:>3}{mark} " + " | ".join(row), flush=True)
 
     placements.dry_run()
+    digest.dry_run()
 
     print(
         f"\n=== книга ===\n"

@@ -166,6 +166,10 @@ class Response:
     verdict: str
     total: float | None
     stop_reasons: list[str] = field(default_factory=list)
+    # Колонка «Что было дальше» (outcome, BB): позвонили, вышел, отказался.
+    # Её заполняет человек, и читается она только на «заполнена или нет» —
+    # текст из неё не попадает ни в отчёт, ни в выгрузку: см. digest.py.
+    outcome: str = ""
 
     @property
     def rejected(self) -> bool:
@@ -213,6 +217,7 @@ def read_responses(values: list[list]) -> list[Response]:
                 stop_reasons=[
                     ru.CONDITION_NAMES.get(f, f) for f in checks.stop_failures(stops)
                 ],
+                outcome=str(cell(row, "outcome")).strip(),
             )
         )
     return out
@@ -870,6 +875,57 @@ def numbers_block(cur: WeekStats, prev: WeekStats) -> str:
         lines += tail
 
     return "\n".join(lines).strip("\n")
+
+
+# --------------------- выводы, когда модель молчит ------------------------
+#
+# Раздел выводов не должен пустовать. Молчание читается как «сказать
+# нечего», а сказать почти всегда есть что — и это видно из тех же цифр.
+# Поэтому на случай недоступной модели здесь лежат выводы, собранные
+# кодом: ни одного домысла, только то, что прямо следует из чисел.
+
+# Что вносить в лист, по которому учёт ещё не начат.
+TRACKING_HINTS = {
+    PLACEMENTS_SHEET: "дату и канал каждого размещения",
+    OUTREACH_SHEET: "дату и сколько сообщений отправлено",
+}
+
+
+def nika_fallback(cur: WeekStats) -> str:
+    """Вывод для Ники по цифрам. Самое первое по важности — одной фразой."""
+    if cur.untracked:
+        what = "; ".join(
+            f"«{title}» — {TRACKING_HINTS[title]}"
+            for title in cur.untracked
+            if title in TRACKING_HINTS
+        )
+        return f"Учёт не заведён. Заполните {what}. Ссылку для поста берите там же."
+    if cur.unlabelled:
+        return (
+            f"Откликов без метки {cur.unlabelled}: ссылку раздают без метки. "
+            "Берите готовую из колонки «Ссылка для размещения»."
+        )
+    if cur.empty_channels:
+        return "Каналы без единого отклика: " + listing(cur.empty_channels) + "."
+    if cur.idle_days:
+        return "Дни без работы: " + short_days(cur.idle_days) + "."
+    return ""
+
+
+def vacancy_fallback(cur: WeekStats) -> str:
+    """Вывод о вакансии по цифрам. Пустым не бывает: отсутствие откликов —
+    тоже сведения об оффере."""
+    if not cur.responses:
+        return "Откликов нет — судить об оффере пока нечем."
+    if cur.reasons:
+        reason, count = max(cur.reasons.items(), key=lambda kv: (kv[1], kv[0]))
+        return (
+            f"Отсеялись на условиях {cur.rejected} из {cur.responses}, "
+            f"чаще всего — {reason} ({count})."
+        )
+    if not cur.verdicts.get("A"):
+        return "Сильных кандидатов нет: все отклики уровня B и C."
+    return "Отклики идут и проходят по условиям — к вакансии вопросов нет."
 
 
 def fit(text: str, budget: int) -> str:

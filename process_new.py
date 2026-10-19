@@ -16,6 +16,10 @@
 сразу переводит её в processing. Два одновременных запуска не обработают
 одну строку дважды.
 
+В конце прогона пересобирается «Сводка для Поли» — выгрузка для внешнего
+бота, см. digest.py. Делается это всегда, а не только когда были новые
+анкеты: окно последних дней в сводке сдвигается само.
+
 Код возврата: 0 — всё в порядке (строки в manual ошибкой не считаются),
 1 — часть строк упала с исключением, 2 — не настроено окружение.
 """
@@ -25,6 +29,7 @@ import os
 import sys
 from collections import Counter
 
+import digest
 from app import recovery, sheets
 from app.config import (
     STATUS_DONE,
@@ -95,6 +100,23 @@ def _write_step_summary(revived: int, processed: int, outcomes: Counter) -> None
         log.warning("не удалось записать сводку в GITHUB_STEP_SUMMARY: %s", e)
 
 
+def refresh_digest() -> None:
+    """Пересобрать «Сводку для Поли» — выгрузку для внешнего бота.
+
+    Делается в конце каждого прогона, даже когда новых анкет не было: в
+    сводке есть окно последних дней, оно сдвигается само, а размещения и
+    колонку «Что было дальше» Ника заполняет между прогонами.
+
+    Сбой здесь прогон не роняет и красным его не делает: анкеты оценены,
+    это главное. В сводке останутся числа прошлого прогона, и в логе
+    сказано, почему.
+    """
+    try:
+        digest.refresh()
+    except Exception:
+        log.exception("сводка для бота не обновлена — в ней числа прошлого прогона")
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Обработка анкет со статусом new")
     parser.add_argument("--dry-run", action="store_true", help="только показать список")
@@ -142,6 +164,7 @@ def main(argv: list[str]) -> int:
         if args.dry_run:
             return 0
 
+    refresh_digest()
     print_summary(revived, outcomes)
 
     if outcomes[OUTCOME_FAILED]:

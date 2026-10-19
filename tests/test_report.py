@@ -868,13 +868,12 @@ def test_fit_cuts_by_word_and_gives_up_when_there_is_no_room():
     assert report.fit("слово " * 50, 20) == "", "в двадцать знаков вывод не влезет"
 
 
-def test_build_message_says_when_the_model_was_silent(filled):
+def test_build_message_fills_the_sections_itself_when_asked_to(filled):
     current, previous = filled
     text = weekly_report.build_message(current, previous)
 
-    assert weekly_report.MODEL_FAILED_LINE in text
     assert len(text) <= report.MESSAGE_LIMIT
-    assert "<b>Нике</b>" not in text
+    assert "<b>Нике</b>" in text and "<b>По вакансии</b>" in text
 
 
 # -------------------------------- отправка --------------------------------
@@ -1219,7 +1218,8 @@ def test_report_is_sent_with_the_model_text(collected, monkeypatch):
     )
     monkeypatch.setattr(weekly_report, "TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.setattr(
-        weekly_report, "conclusions", lambda numbers: ("ВЫВОД НИКЕ", "ВЫВОД ПО ВАКАНСИИ")
+        weekly_report, "conclusions",
+        lambda numbers: weekly_report.Conclusions("ВЫВОД НИКЕ", "ВЫВОД ПО ВАКАНСИИ"),
     )
 
     assert weekly_report.main([]) == 0
@@ -1238,6 +1238,7 @@ def test_failed_model_does_not_cancel_the_report(collected, monkeypatch):
         weekly_report, "telegram_recipients", lambda: recipients("111")
     )
     monkeypatch.setattr(weekly_report, "TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setattr(weekly_report, "ANTHROPIC_API_KEY", "ключ")
     monkeypatch.setattr(
         weekly_report, "client",
         lambda: (_ for _ in ()).throw(RuntimeError("модель недоступна")),
@@ -1246,7 +1247,10 @@ def test_failed_model_does_not_cancel_the_report(collected, monkeypatch):
     assert weekly_report.main([]) == 0
     text = fake.sent[0]["text"]
     assert report.NO_RESPONSES_LINE in text, "цифры уходят и без модели"
-    assert weekly_report.MODEL_FAILED_LINE in text
+    assert weekly_report.API_FAILED_NOTE in text
+    # Раздел не пустует: его заполнил код по тем же цифрам.
+    assert "Откликов нет — судить об оффере пока нечем." in text
+    assert "<b>Нике</b>" in text
 
 
 def test_everyone_failing_is_an_error(collected, monkeypatch):
@@ -1257,7 +1261,9 @@ def test_everyone_failing_is_an_error(collected, monkeypatch):
         weekly_report, "telegram_recipients", lambda: recipients("111")
     )
     monkeypatch.setattr(weekly_report, "TELEGRAM_BOT_TOKEN", "token")
-    monkeypatch.setattr(weekly_report, "conclusions", lambda numbers: ("", ""))
+    monkeypatch.setattr(
+        weekly_report, "conclusions", lambda numbers: weekly_report.Conclusions()
+    )
 
     assert weekly_report.main([]) == 1
 
@@ -1265,32 +1271,35 @@ def test_everyone_failing_is_an_error(collected, monkeypatch):
 # ----------------------------- выводы модели ------------------------------
 
 class FakeAnthropic:
-    """Клиент, отдающий заранее заданный текст. Сети не требует."""
+    """Клиент, отдающий заранее заданные ответы по порядку. Сети не требует."""
 
-    def __init__(self, text: str):
-        self.text = text
+    def __init__(self, *answers: str):
+        self.answers = list(answers)
         self.calls: list[dict] = []
         self.messages = self
 
     def create(self, **kw):
         self.calls.append(kw)
-        block = type("Block", (), {"type": "text", "text": self.text})()
+        text = self.answers.pop(0) if self.answers else "{}"
+        block = type("Block", (), {"type": "text", "text": text})()
         return type("Response", (), {"content": [block]})()
 
 
-def ask(monkeypatch, text: str) -> tuple:
-    fake = FakeAnthropic(text)
+def ask(monkeypatch, *answers: str):
+    fake = FakeAnthropic(*answers)
     monkeypatch.setattr(weekly_report, "client", lambda: fake)
     monkeypatch.setattr(weekly_report, "ANTHROPIC_API_KEY", "ключ")
     return weekly_report.conclusions("ЦИФРЫ"), fake
 
 
 def test_conclusions_come_as_two_sections(monkeypatch):
-    (nika, vacancy), fake = ask(
+    said, fake = ask(
         monkeypatch, '{"nika": "Замени два пустых канала.", "vacancy": "Все C."}'
     )
-    assert nika == "Замени два пустых канала."
-    assert vacancy == "Все C."
+    assert said.nika == "Замени два пустых канала."
+    assert said.vacancy == "Все C."
+    assert said.note == "", "модель ответила — объясняться незачем"
+    assert len(fake.calls) == 1, "второй обход был бы потраченными деньгами"
 
     call = fake.calls[0]
     assert call["model"] == "claude-sonnet-4-6"
@@ -1300,20 +1309,77 @@ def test_conclusions_come_as_two_sections(monkeypatch):
 
 def test_conclusions_survive_a_markdown_wrapper(monkeypatch):
     """Модель иногда оборачивает JSON в ```json — это не повод терять отчёт."""
-    (nika, vacancy), _ = ask(
-        monkeypatch, '```json\n{"nika": "А", "vacancy": "Б"}\n```'
+    said, _ = ask(monkeypatch, '```json\n{"nika": "А", "vacancy": "Б"}\n```')
+    assert (said.nika, said.vacancy) == ("А", "Б")
+
+
+def test_empty_section_is_asked_again(monkeypatch):
+    """Пустой раздел — не ответ. На него уходит одна повторная просьба."""
+    said, fake = ask(
+        monkeypatch,
+        '{"nika": "", "vacancy": "Все отклики уровня C."}',
+        '{"nika": "Заполни «Размещения».", "vacancy": "Все отклики уровня C."}',
     )
-    assert (nika, vacancy) == ("А", "Б")
+
+    assert len(fake.calls) == 2
+    assert said.nika == "Заполни «Размещения»."
+    assert said.vacancy == "Все отклики уровня C."
+    assert said.note == "", "со второй попытки модель ответила — это её выводы"
+
+    # Повторная просьба идёт той же беседой: модель видит свой ответ и прямое
+    # указание заполнить оба раздела.
+    messages = fake.calls[1]["messages"]
+    assert [m["role"] for m in messages] == ["user", "assistant", "user"]
+    assert messages[0]["content"] == "ЦИФРЫ"
+    assert messages[2]["content"] == weekly_report.INSIST
+    assert "заполни оба" in weekly_report.INSIST.lower()
 
 
-def test_missing_section_is_just_empty(monkeypatch):
-    (nika, vacancy), _ = ask(monkeypatch, '{"nika": "А"}')
-    assert (nika, vacancy) == ("А", "")
+def test_retry_does_not_lose_the_section_that_was_filled(monkeypatch):
+    """Во второй раз модель может промолчать уже по другому разделу."""
+    said, fake = ask(
+        monkeypatch,
+        '{"nika": "Первый вывод.", "vacancy": ""}',
+        '{"nika": "", "vacancy": "Второй вывод."}',
+    )
+    assert (said.nika, said.vacancy) == ("Первый вывод.", "Второй вывод.")
+    assert said.note == ""
 
 
-def test_unparsable_answer_does_not_cancel_the_report(monkeypatch):
-    (nika, vacancy), _ = ask(monkeypatch, "я не умею в JSON")
-    assert (nika, vacancy) == ("", "")
+def test_still_empty_after_the_retry_is_reported(monkeypatch):
+    said, fake = ask(
+        monkeypatch, '{"nika": "", "vacancy": "Б"}', '{"nika": "", "vacancy": "Б"}'
+    )
+    assert len(fake.calls) == 2, "больше двух обходов не делаем"
+    assert said.nika == ""
+    assert said.note == weekly_report.EMPTY_ANSWER_NOTE
+
+
+def test_unparsable_answer_is_logged_verbatim(monkeypatch, caplog):
+    """Без дословного ответа «разбор не удался» нельзя отличить от «модель
+    ответила не то», и диагностика упирается в догадки."""
+    with caplog.at_level(logging.ERROR):
+        said, fake = ask(monkeypatch, "я не умею в JSON")
+
+    assert said.nika == "" and said.vacancy == ""
+    assert said.note == weekly_report.API_FAILED_NOTE
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "я не умею в JSON" in logged
+    assert "не разобрался как JSON" in logged
+
+
+def test_api_failure_is_told_apart_from_an_empty_answer(monkeypatch):
+    """«Выводы собрать не удалось» одинаково означало бы и пустой кошелёк, и
+    молчание модели — а лечатся они по-разному."""
+    def boom():
+        raise RuntimeError("Your credit balance is too low")
+
+    monkeypatch.setattr(weekly_report, "client", boom)
+    monkeypatch.setattr(weekly_report, "ANTHROPIC_API_KEY", "ключ")
+
+    said = weekly_report.conclusions("ЦИФРЫ")
+    assert said.note == weekly_report.API_FAILED_NOTE
+    assert weekly_report.API_FAILED_NOTE != weekly_report.EMPTY_ANSWER_NOTE
 
 
 def test_model_is_not_called_without_a_key(monkeypatch):
@@ -1321,8 +1387,119 @@ def test_model_is_not_called_without_a_key(monkeypatch):
     monkeypatch.setattr(weekly_report, "client", lambda: fake)
     monkeypatch.setattr(weekly_report, "ANTHROPIC_API_KEY", "")
 
-    assert weekly_report.conclusions("ЦИФРЫ") == ("", "")
+    said = weekly_report.conclusions("ЦИФРЫ")
+    assert said == weekly_report.Conclusions(note=weekly_report.NO_KEY_NOTE)
     assert fake.calls == [], "без ключа обращаться незачем"
+
+
+# ------------------ выводы, собранные кодом ------------------------------
+#
+# Молчание модели не должно оставлять в отчёте пустой раздел: «сказать
+# нечего» читается как вывод, которым оно не является.
+
+def test_both_sections_are_filled_when_tracking_has_not_started():
+    """Главный случай: учёта нет, модель молчит — разделы всё равно есть."""
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    rows = [
+        data_row(id=f"c{i}", created_at="2026-10-14 10:00:00", source="",
+                 verdict="C", total_score=0, stop_1_sdelno="Нет, нужен оклад")
+        for i in range(8)
+    ]
+    current = report.stats(week, report.read_responses(data_values(*rows)), [], [])
+    previous = report.stats(week.shifted(-1), [], [], [])
+    assert current.tracking_started is False
+
+    text = weekly_report.build_message(
+        current, previous, weekly_report.Conclusions(note="причина")
+    )
+
+    nika = text.split("<b>Нике</b>\n")[1].split("\n\n")[0]
+    vacancy = text.split("<b>По вакансии</b>\n")[1].split("\n\n")[0]
+    assert nika.strip() and vacancy.strip(), "пустых разделов быть не должно"
+    # В разделе Нике сказано, какие листы пусты и что в них внести.
+    for title in ("Размещения", "Личные касания"):
+        assert title in nika, title
+    assert "дату" in nika
+    assert "Отсеялись на условиях" in vacancy
+
+
+def test_code_written_sections_are_marked_as_such():
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    current = report.stats(week, [], [], [])
+    previous = report.stats(week.shifted(-1), [], [], [])
+
+    text = weekly_report.build_message(
+        current, previous, weekly_report.Conclusions(note=weekly_report.API_FAILED_NOTE)
+    )
+    assert text.endswith(weekly_report.API_FAILED_NOTE)
+    assert len(text) <= report.MESSAGE_LIMIT
+
+
+def test_model_sections_are_not_marked(filled):
+    current, previous = filled
+    text = weekly_report.build_message(
+        current, previous,
+        weekly_report.Conclusions("Вывод Нике.", "Вывод по вакансии.", "причина"),
+    )
+    assert "причина" not in text, "это слова модели, объясняться не нужно"
+    assert "Вывод Нике." in text and "Вывод по вакансии." in text
+
+
+def test_half_model_half_code_is_marked(filled):
+    current, previous = filled
+    text = weekly_report.build_message(
+        current, previous,
+        weekly_report.Conclusions("Вывод Нике.", "", weekly_report.EMPTY_ANSWER_NOTE),
+    )
+    assert "Вывод Нике." in text
+    assert report.vacancy_fallback(current) in text
+    assert text.endswith(weekly_report.EMPTY_ANSWER_NOTE)
+
+
+def test_nika_fallback_names_the_most_important_thing_first():
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    posts = read_placements(placement_values(["2026-10-14", "Авито", "", ""]))
+    touches = read_outreach(outreach_values(["2026-10-14", 20, "", "", ""]))
+
+    # Учёт не заведён — это важнее всего остального.
+    nothing = report.stats(week, [], [], [])
+    assert "Учёт не заведён" in report.nika_fallback(nothing)
+
+    # Учёт есть, но метку не ставят — отклики не на что записать.
+    rows = [
+        data_row(id=f"n{i}", created_at="2026-10-14 10:00:00", source="")
+        for i in range(3)
+    ]
+    unlabelled = report.stats(
+        week, report.read_responses(data_values(*rows)), posts, touches
+    )
+    assert "без метки 3" in report.nika_fallback(unlabelled)
+
+    # Метки ставят, каналы пусты — замени каналы.
+    empty = report.stats(week, [], posts, touches)
+    assert "Авито" in report.nika_fallback(empty)
+
+
+@pytest.mark.parametrize(
+    "setup,expected",
+    [
+        ({}, "Откликов нет"),
+        ({"responses": 5, "rejected": 3, "reasons": {"часы": 2, "техника": 1}},
+         "чаще всего — часы (2)"),
+        ({"responses": 5, "verdicts": {"B": 2, "C": 3}}, "Сильных кандидатов нет"),
+        ({"responses": 5, "verdicts": {"A": 1}}, "к вакансии вопросов нет"),
+    ],
+    ids=["нет откликов", "отсев", "нет сильных", "всё хорошо"],
+)
+def test_vacancy_fallback_is_never_empty(setup, expected):
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    current = report.stats(week, [], [], [])
+    for name, value in setup.items():
+        setattr(current, name, value)
+
+    text = report.vacancy_fallback(current)
+    assert text, "об оффере всегда есть что сказать"
+    assert expected in text
 
 
 # --------------------------------- промпт ---------------------------------

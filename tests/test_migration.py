@@ -12,6 +12,7 @@ import pytest
 
 import apply_headers
 import archive_old
+import digest
 import placements
 import sync_questions
 from HEADERS import FIRST_DATA_ROW, HEADERS, col_letter
@@ -112,6 +113,14 @@ class FakeWorksheet:
             [self.cells.get((r, c), "") for c in range(1, cols + 1)]
             for r in range(1, rows + 1)
         ]
+
+    def get_values(self, value_render_option=None) -> list[list[str]]:
+        """Так читают листы учёта: целиком и без форматирования.
+
+        Чтения, как и в остальном листе в памяти, в счётчик обращений не
+        идут: у Sheets свой лимит на чтение, и упираемся мы не в него.
+        """
+        return self.get_all_values()
 
     def row_values(self, row: int) -> list[str]:
         cols = max((c for r, c in self.cells if r == row), default=0)
@@ -557,6 +566,7 @@ def test_card_is_idempotent(book):
             "Данные",
             archive_old.ARCHIVE_TITLE,
             sync_questions.CARD_TITLE,
+            digest.DIGEST_SHEET,
             *PLACEMENT_SHEETS,
         ]
     ), "повторный запуск завёл лишний лист"
@@ -871,3 +881,101 @@ def test_formatting_of_a_sheet_is_two_requests(book):
         f"A{FIRST_DATA_ROW}:A{ws.row_count}",
         f"G{FIRST_DATA_ROW}:G{ws.row_count}",
     ], "форматы ячеек должны уйти одним batch_format"
+
+
+# ------------------------- сводка для бота --------------------------------
+#
+# Лист «Сводка для Поли» (digest.py) — выгрузка значениями для внешнего
+# бота. Собирается скрытым и целиком принадлежит коду: ручного в нём нет,
+# поэтому пересборка переписывает его сверху донизу и ужимает до нужного
+# размера. Числа проверяются в test_digest.py, здесь — работа с книгой.
+
+def digest_sheet(book) -> FakeWorksheet:
+    return book.sheets[digest.DIGEST_SHEET]
+
+
+def digest_totals(book) -> dict:
+    """Блок ИТОГО листом в памяти: «показатель» → «значение»."""
+    rows = digest_sheet(book).get_all_values()
+    start = next(i for i, row in enumerate(rows) if row[0] == digest.TOTALS_TITLE)
+    return {row[0]: row[1] for row in rows[start + 2:] if row[0]}
+
+
+def test_digest_appears_hidden_and_filled(book):
+    add_hand_made_sheets(book)
+    assert sync_questions.main([]) == 0
+
+    ws = digest_sheet(book)
+    assert ws.hidden is True, "лист читает бот, а не человек"
+    assert ws.col_count == digest.DIGEST_COLS
+    assert ws.row_values(1)[0] == digest.CHANNELS_TITLE, "блок с первой строки"
+    # Три анкеты фикстуры: все уровня A, ни у одной не заполнено «Что было
+    # дальше» — ровно то, за чем бот и приходит.
+    assert digest_totals(book)[digest.TOTAL_CANDIDATES] == "3"
+    assert digest_totals(book)[digest.STRONG_UNTOUCHED] == "3"
+
+
+def test_digest_holds_values_and_not_a_single_formula(book):
+    """Формулу бот прочитать не может: через API ячейка приходит либо её
+    текстом, либо последним пересчитанным значением."""
+    sync_questions.main([])
+    ws = digest_sheet(book)
+
+    assert set(ws.input_options.values()) == {"RAW"}
+    assert not [v for v in ws.cells.values() if str(v).startswith("=")]
+
+
+def test_digest_rows_are_all_the_same_width(book):
+    """Короткая строка оставила бы на месте хвоста числа прошлой сборки."""
+    sync_questions.main([])
+    ws = digest_sheet(book)
+    written = [a1 for a1 in ws.input_options if a1 != "A1"]
+    assert written == [f"A1:{col_letter(digest.DIGEST_COLS)}{ws.row_count}"]
+
+
+def test_second_build_leaves_the_digest_to_process_new(book):
+    """Готовый лист повторная сборка книги не трогает.
+
+    Обновляет его прогон process_new, то есть не позже чем через десять
+    минут, а записи Sheets идут в один лимит на минуту с тремя десятками
+    запросов, которыми собираются остальные листы.
+    """
+    sync_questions.main([])
+    ws = digest_sheet(book)
+    ws.put(3, 1, "строка прошлой сборки")
+
+    book.writes = 0
+    assert sync_questions.main([]) == 0
+    assert ws.cells[(3, 1)] == "строка прошлой сборки"
+
+
+def test_refresh_rewrites_the_digest_and_shrinks_it(book):
+    """Строка, оставшаяся от прошлой сборки, уехала бы боту как ещё один
+    канал или ещё один день."""
+    sync_questions.main([])
+    ws = digest_sheet(book)
+
+    tall = ws.row_count + 20
+    ws.resize(rows=tall, cols=digest.DIGEST_COLS)
+    ws.put(tall, 1, "Канал, которого больше нет")
+
+    digest.refresh()
+
+    assert ws.row_count < tall
+    assert (tall, 1) not in ws.cells
+    assert ws.row_values(1)[0] == digest.CHANNELS_TITLE
+
+
+def test_refresh_costs_one_write(book):
+    """Прогон process_new идёт каждые десять минут. Сводка обязана стоить
+    ему одну запись: лист не растёт, не красится и не переразмечается."""
+    sync_questions.main([])
+
+    book.writes = 0
+    digest.refresh()
+    assert book.writes == 1
+
+
+def test_dry_run_creates_no_digest(book):
+    assert sync_questions.main(["--dry-run"]) == 0
+    assert digest.DIGEST_SHEET not in book.sheets

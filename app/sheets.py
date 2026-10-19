@@ -6,6 +6,7 @@ from functools import lru_cache
 
 import gspread
 from google.oauth2.service_account import Credentials
+from gspread.utils import ValueRenderOption
 
 from HEADERS import (
     COL_FORM_END,
@@ -271,3 +272,37 @@ def ensure_header() -> None:
             break
     if len(actual) != len(HEADERS):
         log.error("в таблице %d колонок, в HEADERS.py — %d", len(actual), len(HEADERS))
+
+
+# --- Чтение листов учёта --------------------------------------------------
+#
+# Читают их двое — еженедельный отчёт и выгрузка для бота, — и одинаково:
+# целиком, без форматирования и не падая из-за отсутствующего листа.
+
+def values_of(ws: gspread.Worksheet) -> list[list]:
+    """Все значения листа без форматирования.
+
+    UNFORMATTED_VALUE важен для даты: отформатированная приходит строкой в
+    том виде, в каком её показывают человеку, и зависит от локали книги.
+    Неотформатированная — числом от эпохи Sheets, одинаково всегда.
+    """
+    return ws.get_values(value_render_option=ValueRenderOption.unformatted)
+
+
+def other_sheet(book: gspread.Spreadsheet, title: str) -> list[list]:
+    """Лист учёта. Нет его — считаем без него, с нулями и жалобой в лог.
+
+    Отсутствующий лист — не повод отменять подсчёт: ни отчёт, ни сводку.
+    Книга могла быть собрана не до конца, и ноль размещений в этом случае
+    честнее, чем молчание.
+    """
+    try:
+        return values_of(book.worksheet(title))
+    except gspread.WorksheetNotFound:
+        log.warning(
+            "листа «%s» в книге нет — соберите его: python3 sync_questions.py", title
+        )
+        return []
+    except Exception:
+        log.exception("лист «%s» не прочитался — считаю без него", title)
+        return []

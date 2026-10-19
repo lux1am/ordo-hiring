@@ -73,15 +73,17 @@ def has_line(text: str, label: str, value: int) -> bool:
     return re.search(rf"{re.escape(label)}\s*:\s*{value}\b", text) is not None
 
 class FakeRun:
-    """Подменяет чтение листа, восстановление и обработку строк."""
+    """Подменяет чтение листа, восстановление, обработку строк и сводку."""
 
     def __init__(self, rows, outcomes, revived=0):
         self.rows = rows
         self.outcomes = outcomes
         self.revived = revived
         self.processed = []
+        self.refreshed = 0
 
     def install(self, monkeypatch):
+        monkeypatch.setattr(process_new.digest, "refresh", self.refresh)
         monkeypatch.setattr(process_new.sheets, "rows_with_status", lambda st: list(self.rows))
         monkeypatch.setattr(
             process_new.recovery, "recover", lambda **kw: list(range(self.revived))
@@ -93,6 +95,10 @@ class FakeRun:
             return self.outcomes[self.rows.index(row)]
 
         monkeypatch.setattr(process_new, "process_row", fake_process)
+
+
+    def refresh(self):
+        self.refreshed += 1
 
 
 def test_summary_counts_every_outcome(monkeypatch, capsys):
@@ -200,3 +206,49 @@ def test_sheet_read_failure_exits_with_1(monkeypatch):
 
     monkeypatch.setattr(process_new.sheets, "rows_with_status", boom)
     assert process_new.main([]) == 1
+
+
+# --------------------------- сводка для бота ------------------------------
+#
+# «Сводка для Поли» — выгрузка для внешнего бота, см. digest.py. Собирает её
+# прогон обработки: своего расписания у неё нет.
+
+def test_digest_is_refreshed_after_processing(monkeypatch):
+    run = FakeRun([2, 3], [STATUS_DONE, STATUS_DONE])
+    run.install(monkeypatch)
+
+    assert process_new.main([]) == 0
+    assert run.refreshed == 1
+
+
+def test_digest_is_refreshed_even_when_there_were_no_new_rows(monkeypatch):
+    """Окно последних дней в сводке сдвигается само, а размещения и колонку
+    «Что было дальше» Ника заполняет между прогонами."""
+    run = FakeRun([], [])
+    run.install(monkeypatch)
+
+    assert process_new.main([]) == 0
+    assert run.refreshed == 1
+
+
+def test_dry_run_does_not_touch_the_digest(monkeypatch):
+    run = FakeRun([2], [STATUS_DONE])
+    run.install(monkeypatch)
+
+    assert process_new.main(["--dry-run"]) == 0
+    assert run.refreshed == 0
+
+
+def test_digest_failure_does_not_make_the_run_red(monkeypatch, capsys):
+    """Анкеты оценены — это главное. В сводке останутся числа прошлого
+    прогона, и в логе сказано, почему."""
+    run = FakeRun([2], [STATUS_DONE])
+    run.install(monkeypatch)
+
+    def boom():
+        raise RuntimeError("Google API недоступен")
+
+    monkeypatch.setattr(process_new.digest, "refresh", boom)
+
+    assert process_new.main([]) == 0
+    assert "СВОДКА ПРОГОНА" in capsys.readouterr().out

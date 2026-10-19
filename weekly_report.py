@@ -33,9 +33,7 @@ import sys
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
-
-import gspread
-from gspread.utils import ValueRenderOption
+from typing import NamedTuple
 
 import placements
 from app import report, sheets
@@ -66,8 +64,6 @@ TELEGRAM_API = "https://api.telegram.org"
 # модели, — экранируется в app/report.py.
 PARSE_MODE = "HTML"
 
-MODEL_FAILED_LINE = "Выводы собрать не удалось."
-
 # Слова, по которым отказ узнаётся как «дело в теме, а не в чате». Телеграм
 # отвечает то «message thread not found», то «TOPIC_CLOSED» — общего кода у
 # этих ответов нет, есть только 400 и слово про тему.
@@ -83,37 +79,15 @@ def now_local() -> datetime:
 
 # ------------------------------- чтение книги -----------------------------
 
-def values_of(ws: gspread.Worksheet) -> list[list]:
-    """Все значения листа без форматирования.
-
-    UNFORMATTED_VALUE важен для даты: отформатированная приходит строкой в
-    том виде, в каком её показывают человеку, и зависит от локали книги.
-    Неотформатированная — числом от эпохи Sheets, одинаково всегда.
-    """
-    return ws.get_values(value_render_option=ValueRenderOption.unformatted)
-
-
-def other_sheet(book: gspread.Spreadsheet, title: str) -> list[list]:
-    """Лист учёта. Нет его — отчёт всё равно уходит, с нулями и жалобой в лог."""
-    try:
-        return values_of(book.worksheet(title))
-    except gspread.WorksheetNotFound:
-        log.warning(
-            "листа «%s» в книге нет — соберите его: python3 sync_questions.py", title
-        )
-        return []
-    except Exception:
-        log.exception("лист «%s» не прочитался — считаю без него", title)
-        return []
-
-
 def read_all() -> tuple[list[list], list[list], list[list]]:
+    """Три листа целиком. Читает их app/sheets.py — теми же функциями, что
+    и выгрузка для бота: отчёт и сводка обязаны видеть одни и те же числа."""
     data = sheets.worksheet()
     book = data.spreadsheet
     return (
-        values_of(data),
-        other_sheet(book, PLACEMENTS_SHEET),
-        other_sheet(book, OUTREACH_SHEET),
+        sheets.values_of(data),
+        sheets.other_sheet(book, PLACEMENTS_SHEET),
+        sheets.other_sheet(book, OUTREACH_SHEET),
     )
 
 
@@ -149,49 +123,127 @@ def load_prompt() -> str:
     return (BASE_DIR / "prompts" / "report.md").read_text(encoding="utf-8")
 
 
-def conclusions(numbers: str) -> tuple[str, str]:
+class Conclusions(NamedTuple):
+    """Выводы модели и причина, если их нет.
+
+    note пустая — выводы собрала модель. Непустая — объясняет, почему их
+    собрал код: иначе «Выводы собрать не удалось» равно означало бы и
+    недоступную модель, и модель, ответившую пустотой, а это разные
+    поломки с разным лечением.
+    """
+
+    nika: str = ""
+    vacancy: str = ""
+    note: str = ""
+
+
+NO_KEY_NOTE = "Выводы собраны по цифрам: ключ модели не задан."
+NO_MODEL_NOTE = "Выводы собраны по цифрам: прогон без модели."
+API_FAILED_NOTE = "Выводы собраны по цифрам: модель недоступна."
+EMPTY_ANSWER_NOTE = "Выводы собраны по цифрам: модель не вернула разделы."
+
+# Чем просят дополнить ответ, в котором раздел остался пустым. Уходит
+# вторым сообщением той же беседы — первое модель уже видела.
+INSIST = (
+    "В ответе пустой раздел, а это не ответ. Заполни оба: nika и vacancy, "
+    "по одной-две фразы. Если вывода из цифр не следует, скажи, что нужно "
+    "сделать, чтобы он появился — например, какие листы учёта заполнить."
+)
+
+
+def ask_model(numbers: str, answered: str = "") -> tuple[str, str]:
+    """Один обход модели. answered непустой — это повторная просьба.
+
+    Сырой ответ попадает в лог при любой осечке: без него «разбор не
+    удался» нельзя отличить от «модель ответила не то», и диагностика
+    упирается в догадки.
+    """
+    messages = [{"role": "user", "content": numbers}]
+    if answered:
+        messages += [
+            {"role": "assistant", "content": answered},
+            {"role": "user", "content": INSIST},
+        ]
+
+    response = call_with_backoff(
+        lambda: client().messages.create(
+            model=REPORT_MODEL,
+            max_tokens=REPORT_MAX_TOKENS,
+            system=load_prompt(),
+            messages=messages,
+        ),
+        label="отчёт",
+    )
+    raw = text_of(response)
+    try:
+        parsed = parse_json(raw)
+    except Exception:
+        log.error("ответ модели не разобрался как JSON, дословно: %s", raw[:500])
+        raise
+
+    nika = str(parsed.get("nika") or "").strip()
+    vacancy = str(parsed.get("vacancy") or "").strip()
+    if not nika or not vacancy:
+        log.warning(
+            "модель оставила раздел пустым (nika: %d знаков, vacancy: %d), "
+            "дословно: %s",
+            len(nika), len(vacancy), raw[:500],
+        )
+    return nika, vacancy
+
+
+def conclusions(numbers: str) -> Conclusions:
     """Два раздела выводов от модели: «Нике» и «По вакансии».
 
     Модель отвечает объектом {"nika": "...", "vacancy": "..."} — просить у
-    неё разметку незачем, заголовки ставит код. Не разобралось или не
-    ответила — оба раздела пустые, и отчёт уходит одними цифрами: цифры
-    важнее формулировок.
+    неё разметку незачем, заголовки ставит код.
+
+    Пустой раздел валидным ответом не считается: на него уходит одна
+    повторная просьба с явным указанием заполнить оба. Не помогло или
+    модель недоступна — разделы собирает код по тем же цифрам, см.
+    report.nika_fallback и report.vacancy_fallback.
     """
     if not ANTHROPIC_API_KEY:
-        log.warning("ANTHROPIC_API_KEY не задан — отчёт уйдёт одними цифрами")
-        return "", ""
+        log.warning("ANTHROPIC_API_KEY не задан — выводы соберёт код")
+        return Conclusions(note=NO_KEY_NOTE)
+
     try:
-        response = call_with_backoff(
-            lambda: client().messages.create(
-                model=REPORT_MODEL,
-                max_tokens=REPORT_MAX_TOKENS,
-                system=load_prompt(),
-                messages=[{"role": "user", "content": numbers}],
-            ),
-            label="отчёт",
-        )
-        parsed = parse_json(text_of(response))
-        return str(parsed.get("nika") or ""), str(parsed.get("vacancy") or "")
+        nika, vacancy = ask_model(numbers)
+        if not nika or not vacancy:
+            # Модель отвечает, но молчит по разделу. Просим ещё раз, явно.
+            again_nika, again_vacancy = ask_model(
+                numbers, answered=json.dumps(
+                    {"nika": nika, "vacancy": vacancy}, ensure_ascii=False
+                )
+            )
+            nika, vacancy = again_nika or nika, again_vacancy or vacancy
     except Exception:
         # Сбой модели не отменяет отчёт: цифры посчитаны и уйдут без неё.
-        log.exception("модель не собрала выводы — отправляю одни цифры")
-        return "", ""
+        log.exception("модель не собрала выводы — выводы соберёт код")
+        return Conclusions(note=API_FAILED_NOTE)
+
+    note = "" if (nika and vacancy) else EMPTY_ANSWER_NOTE
+    return Conclusions(nika, vacancy, note)
 
 
-def build_message(cur, prev, nika: str = "", vacancy: str = "") -> str:
+def build_message(cur, prev, said: Conclusions = Conclusions()) -> str:
     """Сообщение целиком. Цифры собирает код, выводы вписываются в остаток.
 
-    Не ответила модель — на её месте одна строка об этом: читатель должен
-    знать, что выводов нет, а не думать, что их не было о чём написать.
+    Раздел, по которому модель промолчала, заполняется по цифрам — пустых
+    разделов в отчёте не бывает. Если хоть один заполнен кодом, в конце
+    стоит строка о том, почему: читатель должен понимать, чьи это слова.
     """
-    if not nika and not vacancy:
-        tail = f"\n\n{MODEL_FAILED_LINE}"
-        # Место под эту строку вычитается из потолка заранее: прибавленная
-        # после сборки, она однажды вынесла бы сообщение за предел.
-        return report.message(
-            cur, prev, limit=report.MESSAGE_LIMIT - len(tail)
-        ) + tail
-    return report.message(cur, prev, nika, vacancy)
+    nika = said.nika or report.nika_fallback(cur)
+    vacancy = said.vacancy or report.vacancy_fallback(cur)
+
+    from_code = (not said.nika and nika) or (not said.vacancy and vacancy)
+    tail = f"\n\n{said.note}" if (from_code and said.note) else ""
+
+    # Место под эту строку вычитается из потолка заранее: прибавленная
+    # после сборки, она однажды вынесла бы сообщение за предел.
+    return report.message(
+        cur, prev, nika, vacancy, limit=report.MESSAGE_LIMIT - len(tail)
+    ) + tail
 
 
 # ------------------------------- отправка ---------------------------------
@@ -351,8 +403,8 @@ def main(argv: list[str]) -> int:
         log.exception("не удалось собрать цифры отчёта")
         return 1
 
-    nika, vacancy = ("", "") if args.no_model else conclusions(numbers)
-    message = build_message(current, previous, nika, vacancy)
+    said = Conclusions(note=NO_MODEL_NOTE) if args.no_model else conclusions(numbers)
+    message = build_message(current, previous, said)
     log.info(
         "сообщение собрано: %d знаков из %d", len(message), report.MESSAGE_LIMIT
     )
