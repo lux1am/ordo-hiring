@@ -979,3 +979,15 @@ def test_refresh_costs_one_write(book):
 def test_dry_run_creates_no_digest(book):
     assert sync_questions.main(["--dry-run"]) == 0
     assert digest.DIGEST_SHEET not in book.sheets
+
+
+def test_digest_created_by_a_run_is_hidden_right_away(book):
+    """Завести лист может и прогон process_new — он приходит раз в десять
+    минут, а сборку книги запускают руками и редко."""
+    assert digest.DIGEST_SHEET not in book.sheets
+
+    digest.refresh()
+
+    ws = digest_sheet(book)
+    assert ws.hidden is True
+    assert ws.row_values(1)[0] == digest.CHANNELS_TITLE

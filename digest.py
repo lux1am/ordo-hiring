@@ -381,12 +381,33 @@ def open_digest(book: gspread.Spreadsheet, rows: int) -> gspread.Worksheet:
         ws = book.worksheet(DIGEST_SHEET)
     except gspread.WorksheetNotFound:
         ws = book.add_worksheet(title=DIGEST_SHEET, rows=rows, cols=DIGEST_COLS)
+        hide(ws)
         log.info("создан лист «%s»", DIGEST_SHEET)
         return ws
 
     if (ws.row_count, ws.col_count) != (rows, DIGEST_COLS):
         ws.resize(rows=rows, cols=DIGEST_COLS)
     return ws
+
+
+def hide(ws: gspread.Worksheet) -> None:
+    """Спрятать лист сразу, как только он заведён.
+
+    Прячет листы sync_questions.py, но завести этот может и прогон
+    process_new — он приходит раз в десять минут, а сборку книги запускают
+    руками и редко. Лист, созданный прогоном и оставшийся на виду, Ника
+    нашла бы в книге раньше, чем кто-нибудь собрал бы книгу заново.
+
+    Не спрятался — не беда: числа в нём те же, и ближайшая сборка книги
+    видимость поправит.
+    """
+    try:
+        ws.hide()
+    except Exception:
+        log.exception(
+            "лист «%s» не спрятался — спрячет его python3 sync_questions.py",
+            DIGEST_SHEET,
+        )
 
 
 def rebuild(book: gspread.Spreadsheet, now: datetime | None = None) -> None:
