@@ -13,13 +13,15 @@ A1. Смена фамилии в списке мгновенно перестр�
 и ложатся текстом: они меняются вместе со схемой анкеты, а не с каждым
 кандидатом.
 
-Скрипт заодно убирает прежнюю затею — лист «Вопросы» и примечания к шапке
-«Данных» — и приводит в порядок видимость листов: склад прячет, рабочие
-листы показывает.
+Скрипт заодно собирает листы учёта размещений — «Каналы», «Размещения»,
+«Личные касания» и «Эффективность», см. placements.py, — убирает прежнюю
+затею (лист «Вопросы» и примечания к шапке «Данных») и приводит в порядок
+видимость листов: склад прячет, рабочие листы показывает.
 
-Скрипт идемпотентный: лист собирается заново поверх прежнего, а не
-дополняется. Выбранная в A1 фамилия при пересборке сохраняется. Запускать
-можно сколько угодно раз.
+Скрипт идемпотентный: карточка собирается заново поверх прежней, а не
+дополняется. Выбранная в A1 фамилия при пересборке сохраняется. В листах
+учёта размещений переписываются только шапка и колонки с формулами —
+заполненное руками остаётся на месте. Запускать можно сколько угодно раз.
 
 Вызывается сам в конце apply_headers.py — чтобы при смене схемы анкеты
 карточка обновлялась вместе с шапкой и не отставала от формулировок.
@@ -46,9 +48,14 @@ import sys
 import gspread
 from gspread.utils import ValidationConditionType
 
+import placements
 from HEADERS import FIRST_DATA_ROW, HEADERS, col_letter, index_of
 from app import checks, ru, sheets
 from app.config import (
+    CHANNELS_SHEET,
+    EFFICIENCY_SHEET,
+    OUTREACH_SHEET,
+    PLACEMENTS_SHEET,
     SHEET_ID,
     WORKSHEET_NAME,
     load_questions,
@@ -68,9 +75,17 @@ CARD_TITLE = "Карточка"
 OLD_SHEET_TITLE = "Вопросы"
 
 # Видимость листов в конце прогона. «Данные» и архив — склад, в них лазают
-# по делу; остальные три читает человек.
+# по делу; остальное читает и заполняет человек, и прятаться этому незачем.
 HIDDEN_SHEETS = (WORKSHEET_NAME, ARCHIVE_TITLE)
-VISIBLE_SHEETS = ("Кандидаты", CARD_TITLE, "Как читать")
+VISIBLE_SHEETS = (
+    "Кандидаты",
+    CARD_TITLE,
+    CHANNELS_SHEET,
+    PLACEMENTS_SHEET,
+    OUTREACH_SHEET,
+    EFFICIENCY_SHEET,
+    "Как читать",
+)
 
 # Ячейка с фамилией. Все формулы карточки смотрят сюда.
 NAME_CELL = "$A$1"
@@ -603,6 +618,8 @@ def sync() -> str:
         "лист «%s» собран: %d строк, выбрано «%s»", CARD_TITLE, len(values), name or "—"
     )
 
+    placements.sync(book)
+
     set_visibility(book)
     return export_url(card.id, len(values))
 
@@ -614,6 +631,8 @@ def dry_run() -> None:
     for i, row in enumerate(values, start=1):
         mark = "**" if i in bold else "  "
         print(f"{i:>3}{mark} " + " | ".join(row), flush=True)
+
+    placements.dry_run()
 
     print(
         f"\n=== книга ===\n"
@@ -628,10 +647,10 @@ def dry_run() -> None:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
-        description="Пересобрать лист «Карточка» и видимость листов книги"
+        description="Пересобрать «Карточку», листы учёта размещений и видимость листов"
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="напечатать карточку в терминал"
+        "--dry-run", action="store_true", help="напечатать листы в терминал"
     )
     args = parser.parse_args(argv)
 
@@ -657,7 +676,8 @@ def main(argv: list[str]) -> int:
         return 1
 
     print(
-        f"\nГотово. Лист «{CARD_TITLE}» собран из questions.json.\n"
+        f"\nГотово. Лист «{CARD_TITLE}» собран из questions.json, листы учёта "
+        f"размещений — из placements.py.\n"
         f"Печать одной страницей (книжная ориентация задана в ссылке):\n{link}\n",
         flush=True,
     )

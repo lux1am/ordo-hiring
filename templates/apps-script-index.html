@@ -167,6 +167,10 @@
     </section>
 
     <input type="hidden" name="telemetry" id="telemetry">
+    <!-- Метка размещения. Здесь она почти всегда пустая: ссылки с ?src=
+         раздаются на статическую страницу, а не на адрес Apps Script. Поле
+         всё равно есть — общий JS один на оба варианта формы. -->
+    <input type="hidden" name="source" id="source">
     <div class="error" id="form-error" hidden></div>
     <button type="submit" id="submit-btn">Отправить анкету</button>
   </form>

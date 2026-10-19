@@ -37,7 +37,7 @@ import gspread
 
 from HEADERS import (
     COL_FORM_START,
-    COL_MANUAL_END,
+    COL_SOURCE,
     COL_RESULT_START,
     COL_SCORES_END,
     COL_TOTAL_SCORE,
@@ -113,8 +113,11 @@ def clear_ranges(last_row: int) -> list[str]:
     if last_row < FIRST_DATA_ROW:
         return []
     left = f"{col_letter(COL_FORM_START)}{FIRST_DATA_ROW}:{col_letter(COL_SCORES_END)}{last_row}"
-    right = f"{col_letter(COL_RESULT_START)}{FIRST_DATA_ROW}:{col_letter(COL_MANUAL_END)}{last_row}"
-    assert COL_SCORES_END < COL_TOTAL_SCORE < COL_RESULT_START
+    # Правый диапазон идёт до последней колонки листа, а не до конца зоны
+    # результата: за ней стоят заметки, исход и метка размещения, и
+    # оставленная метка приписала бы старый отклик будущему размещению.
+    right = f"{col_letter(COL_RESULT_START)}{FIRST_DATA_ROW}:{col_letter(COL_SOURCE)}{last_row}"
+    assert COL_SCORES_END < COL_TOTAL_SCORE < COL_RESULT_START <= COL_SOURCE
     return [left, right]
 
 

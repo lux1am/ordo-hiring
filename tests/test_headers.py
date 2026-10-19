@@ -2,7 +2,9 @@
 from HEADERS import (
     COL_FORM_END,
     COL_FORM_START,
+    COL_MANUAL_END,
     COL_MANUAL_START,
+    COL_SOURCE,
     COL_RESULT_END,
     COL_RESULT_START,
     COL_SCORES_END,
@@ -16,9 +18,9 @@ from HEADERS import (
 
 
 def test_column_count():
-    assert len(HEADERS) == 54
-    assert col_letter(54) == "BB"
-    assert len(set(HEADERS)) == 54, "имена колонок должны быть уникальны"
+    assert len(HEADERS) == 55
+    assert col_letter(55) == "BC"
+    assert len(set(HEADERS)) == 55, "имена колонок должны быть уникальны"
 
 
 def test_score_anchors_match_sheet_formula():
@@ -49,9 +51,23 @@ def test_zones_are_contiguous_and_disjoint():
     assert COL_MANUAL_START == COL_RESULT_END + 1
 
 
-def test_manual_columns_are_last():
+def test_manual_columns_are_followed_only_by_the_source_label():
     assert HEADERS[COL_MANUAL_START - 1] == "manual_note"
-    assert HEADERS[-1] == "outcome"
+    assert HEADERS[COL_MANUAL_END - 1] == "outcome"
+    assert HEADERS[-1] == "source", "метка дописана в конец, после ручных колонок"
+    assert COL_SOURCE == len(HEADERS)
+
+
+def test_source_is_outside_every_write_zone():
+    """Метку пишет только сабмит, отдельной ячейкой — зоны её не накрывают."""
+    zones = [
+        range(COL_FORM_START, COL_FORM_END + 1),
+        range(COL_SCORES_START, COL_SCORES_END + 1),
+        range(COL_RESULT_START, COL_RESULT_END + 1),
+        range(COL_MANUAL_START, COL_MANUAL_END + 1),
+    ]
+    for zone in zones:
+        assert COL_SOURCE not in zone, f"зона {zone} накрывает source"
 
 
 def test_a1_ranges():

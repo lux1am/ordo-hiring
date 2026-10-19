@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from app import ratelimit, recovery, sheets
+from app import ratelimit, recovery, sheets, source as src
 from app.config import (
     BASE_DIR,
     HONEYPOT_FIELD,
@@ -191,6 +191,9 @@ async def submit(request: Request, background: BackgroundTasks):
         return _render_error(request, errors, raw)
 
     submission_id = new_id()
+    # Метка размещения: форма подставляет её из ?src= в адресе ссылки.
+    # Чистится ещё раз здесь — в поле могло приехать что угодно.
+    source = src.clean(raw.get("source"))
     flags = telemetry_flags(sub) + profile_flags(sub.profile)
     # Ответы о мотивации кладём в AP сразу: отдельной колонки под них нет, а
     # обработчик их уже не увидит — в анкетной зоне A..AH их не бывает.
@@ -202,7 +205,13 @@ async def submit(request: Request, background: BackgroundTasks):
     log.info(
         "ПОЛУЧЕНА АНКЕТА %s",
         json.dumps(
-            {"id": submission_id, "ip": ip, "flags": flags, "values": values},
+            {
+                "id": submission_id,
+                "ip": ip,
+                "flags": flags,
+                "source": source,
+                "values": values,
+            },
             ensure_ascii=False,
         ),
     )
@@ -214,7 +223,7 @@ async def submit(request: Request, background: BackgroundTasks):
             log.warning("строка %d: дубль по телеграму %s, модель не вызываем", row, sub.telegram)
             sheets.write_form(
                 row, values, ", ".join(flags),
-                status=STATUS_DUPLICATE, markers=markers,
+                status=STATUS_DUPLICATE, markers=markers, source=source,
             )
             sheets.write_result(
                 row,
@@ -234,7 +243,9 @@ async def submit(request: Request, background: BackgroundTasks):
             )
             return _thanks(request)
 
-        sheets.write_form(row, values, ", ".join(flags), markers=markers)
+        sheets.write_form(
+            row, values, ", ".join(flags), markers=markers, source=source
+        )
     except Exception:
         log.exception("анкета %s: не удалось записать в таблицу", submission_id)
         return _render_error(
@@ -245,6 +256,9 @@ async def submit(request: Request, background: BackgroundTasks):
             code=500,
         )
 
-    log.info("анкета %s записана в строку %d, флаги: %s", submission_id, row, flags or "нет")
+    log.info(
+        "анкета %s записана в строку %d, метка «%s», флаги: %s",
+        submission_id, row, source or "—", flags or "нет",
+    )
     background.add_task(process_row, row)
     return _thanks(request)

@@ -14,6 +14,7 @@ from HEADERS import (
     COL_RESULT_START,
     COL_SCORES_END,
     COL_SCORES_START,
+    COL_SOURCE,
     COL_TOTAL_SCORE,
     FIRST_DATA_ROW,
     FORMULA_TOPUP_FROM_ROW,
@@ -51,6 +52,7 @@ COL_AI_MARKERS = index_of("ai_markers")
 STATUS_A1 = col_letter(COL_STATUS)
 FLAGS_A1 = col_letter(COL_FLAGS)
 AI_MARKERS_A1 = col_letter(COL_AI_MARKERS)
+SOURCE_A1 = col_letter(COL_SOURCE)
 
 
 @lru_cache(maxsize=1)
@@ -121,14 +123,19 @@ def write_form(
     flags: str,
     status: str = STATUS_NEW,
     markers: str = "",
+    source: str = "",
 ) -> None:
-    """Зона A..AH плюс три ячейки из AO..AZ. Всё RAW, AN не задевается.
+    """Зона A..AH плюс три ячейки из AO..AZ и метка в BC. Всё RAW, AN не задевается.
 
     Флаги (AS) и ответы о мотивации (AP) пишутся уже здесь, а не при
     обработке: ни is_mobile со временем ухода со вкладки, ни выбранные
     варианты в лист иначе не попадают — отдельных колонок под них нет, — и
     после перезапуска процесса восстановить их было бы неоткуда. Статус
     (AU) начальный.
+
+    Метка размещения (BC) пишется отдельной ячейкой: в анкетной зоне
+    A..AH места под неё нет, а сдвигать зону нельзя — на её границы
+    опираются и формула в AN, и адреса в Apps Script.
     """
     assert len(values) == COL_FORM_END - COL_FORM_START + 1, (
         f"ожидалось {COL_FORM_END - COL_FORM_START + 1} значений, получено {len(values)}"
@@ -139,6 +146,7 @@ def write_form(
             {"range": f"{AI_MARKERS_A1}{row}", "values": [[markers]]},
             {"range": f"{FLAGS_A1}{row}", "values": [[flags]]},
             {"range": f"{STATUS_A1}{row}", "values": [[status]]},
+            {"range": f"{SOURCE_A1}{row}", "values": [[source]]},
         ],
         value_input_option="RAW",
     )

@@ -17,6 +17,11 @@
 скрипт отказывается работать и отсылает к archive_old.py; обойти проверку —
 --force, но тогда за смысл данных отвечаете вы.
 
+Одно исключение: колонка, дописанная в конец шапки, разрешена и при
+непустом листе. Ни одно прежнее имя при этом не переезжает, и анкеты под
+ними сохраняют смысл — архивировать живых людей ради новой колонки
+незачем. Так в лист добавилась метка размещения (BC).
+
 Запуск:
 
     python3 apply_headers.py            # записать шапку
@@ -68,6 +73,26 @@ def occupied_rows(values: list[list]) -> int:
     заведомо пустом листе.
     """
     return sum(1 for row in values[FIRST_DATA_ROW - 1:] if sheets.row_has_data(row))
+
+
+def appended_only(diff: list[tuple[int, str, str]], actual: list[str]) -> bool:
+    """Расхождение — только новые колонки, дописанные в конец пустой шапки?
+
+    Такое бывает ровно в одном случае: в раскладку добавили колонку, и
+    физически она ещё не заведена. Старые строки от этого не меняют смысла —
+    ни одно имя не переехало, — поэтому архивировать анкеты живых людей
+    ради такой правки незачем, и шапка пишется поверх строк.
+
+    Всё остальное — переименование, перестановка, другой состав — по-прежнему
+    требует архива: там ячейка под новым именем означала бы не то, что в ней
+    написано.
+    """
+    width = len([cell for cell in actual if str(cell).strip()])
+    if not diff or not width:
+        # Пустая шапка — не «дописали в конец», а несобранный лист: что
+        # означают строки под ней, неизвестно, и решать это должен человек.
+        return False
+    return all(i > width and not got for i, _, got in diff)
 
 
 def describe(diff: list[tuple[int, str, str]]) -> list[str]:
@@ -134,7 +159,14 @@ def main(argv: list[str]) -> int:
         print(line, flush=True)
 
     rows = occupied_rows(values)
-    if rows and not args.force:
+    appended = appended_only(diff, values[0] if values else [])
+    if rows and appended:
+        log.info(
+            "расхождение — только дописанные в конец колонки (%s); имена "
+            "прежних колонок не менялись, строки под ними сохраняют смысл",
+            ", ".join(col_letter(i) for i, _, _ in diff),
+        )
+    elif rows and not args.force:
         log.error(
             "в листе «%s» осталось строк с данными: %d. Под новой шапкой они "
             "означали бы не то, что в них написано. Сначала уберите их: "
@@ -142,7 +174,7 @@ def main(argv: list[str]) -> int:
             WORKSHEET_NAME, rows,
         )
         return 1
-    if rows:
+    elif rows:
         log.warning("--force: шапка меняется поверх %d строк с данными", rows)
 
     if args.dry_run:

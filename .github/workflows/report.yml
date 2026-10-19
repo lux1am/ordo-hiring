@@ -1,0 +1,53 @@
+name: report
+
+# Еженедельный отчёт по подбору в Телеграм: weekly_report.py.
+#
+# Цифры считает код, выводы формулирует модель, отправка — через Bot API.
+# Отчёт уходит всегда: нет откликов — уходит с явной строкой об этом.
+
+on:
+  schedule:
+    # Понедельник, 09:00 МСК. GitHub считает расписание в UTC, МСК — UTC+3,
+    # поэтому здесь 06:00. Перехода на летнее время в России нет, и
+    # пересчитывать это дважды в год не придётся.
+    #
+    # На бесплатном тарифе запуск может задержаться на десятки минут при
+    # общей нагрузке — для недельного отчёта это неважно.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+# Два отчёта об одной неделе двум людям в руки — хуже, чем один с
+# задержкой. Идущий прогон не отменяется: он может быть уже на отправке.
+concurrency:
+  group: report
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Установка зависимостей
+        run: pip install -r requirements.txt
+
+      - name: Отчёт за прошедшую неделю
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
+          WORKSHEET_NAME: ${{ vars.WORKSHEET_NAME || 'Данные' }}
+          TZ_OFFSET_HOURS: ${{ vars.TZ_OFFSET_HOURS || '3' }}
+        run: python weekly_report.py

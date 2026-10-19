@@ -55,7 +55,8 @@ const HEADERS = [
   "ai_ru",
   "flags_ru",
   "manual_note",
-  "outcome"
+  "outcome",
+  "source"
 ];
 
 const COL_FORM_END = 34;        // AH — последняя колонка анкеты
@@ -64,6 +65,7 @@ const COL_AI_MARKERS = 42;        // AP
 const COL_STATUS = 47;            // AU
 const COL_TELEGRAM = 4;           // D
 const COL_TOTAL_SCORE = 40;        // AN — формула, не трогаем
+const COL_SOURCE = 55;             // BC — метка размещения
 const FIRST_DATA_ROW = 2;
 const LAST_PREPARED_ROW = 301;
 const FORMULA_TOPUP_FROM_ROW = 251;

@@ -107,7 +107,13 @@ def test_cname_is_generated_not_handwritten():
     артефакт целиком и стирает всё, чего в артефакте нет.
     """
     assert '"dist/CNAME": build_cname' in BUILD_GS
-    assert f'CUSTOM_DOMAIN = "{DOMAIN}"' in BUILD_GS
+    # Имя домена лежит в app/config.py: ту же строку подставляет формула
+    # «Ссылка для размещения» в листе «Размещения».
+    assert "CUSTOM_DOMAIN = FORM_DOMAIN" in BUILD_GS
+
+    from app.config import FORM_DOMAIN
+
+    assert FORM_DOMAIN == DOMAIN
 
 
 def test_cname_content():

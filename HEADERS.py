@@ -1,7 +1,7 @@
 """Порядок колонок листа «Данные». Единственный источник истины.
 
 Шапка — строка 1. Данные начинаются со строки 2.
-Всего 54 колонки: A..BB.
+Всего 55 колонок: A..BC.
 
 Три зоны записи, они не пересекаются:
     A..AH   (1..34)   — анкета и телеметрия, пишет POST /submit
@@ -9,6 +9,11 @@
     AN      (40)      — total_score, ФОРМУЛА В ТАБЛИЦЕ, код её не перезаписывает
     AO..AZ  (41..52)  — результат скоринга и витринные поля, пишет обработчик
     BA..BB  (53..54)  — manual_note, outcome, заполняются вручную
+    BC      (55)      — source, метка размещения, пишет POST /submit
+
+Метка дописана в конец отдельной ячейкой, а не внесена в анкетную зону
+A..AH: зоны записи и формула в AN закреплены тестами и адресами в Apps
+Script, и сдвиг любой из них переложил бы баллы в чужие колонки.
 """
 
 HEADERS = [
@@ -75,6 +80,8 @@ HEADERS = [
 
     "manual_note",     # 53 BA  <-- вручную
     "outcome",         # 54 BB  <-- вручную
+
+    "source",          # 55 BC  <-- метка размещения, пишет /submit
 ]
 
 # --- Границы зон (1-based номера колонок) ---------------------------------
@@ -85,6 +92,7 @@ COL_SCORES_START, COL_SCORES_END = 35, 39   # AI..AM
 COL_TOTAL_SCORE = 40                        # AN — формула
 COL_RESULT_START, COL_RESULT_END = 41, 52   # AO..AZ
 COL_MANUAL_START, COL_MANUAL_END = 53, 54   # BA..BB
+COL_SOURCE = 55                             # BC — метка размещения
 
 FIRST_DATA_ROW = 2
 PREPARED_ROWS = 300                          # строки 2..301 размечены формулой
@@ -95,7 +103,7 @@ TOTAL_SCORE_FORMULA = '=IF(A{row}="","",SUM(AI{row}:AM{row}))'
 
 
 def col_letter(n: int) -> str:
-    """1 -> A, 27 -> AA, 54 -> BB."""
+    """1 -> A, 27 -> AA, 55 -> BC."""
     if n < 1:
         raise ValueError(f"номер колонки должен быть >= 1, получено {n}")
     out = ""
@@ -115,11 +123,13 @@ def a1_range(row: int, start_col: int, end_col: int) -> str:
     return f"{col_letter(start_col)}{row}:{col_letter(end_col)}{row}"
 
 
-assert len(HEADERS) == 54, f"ожидалось 54 колонки, в списке {len(HEADERS)}"
-assert col_letter(len(HEADERS)) == "BB"
+assert len(HEADERS) == 55, f"ожидалось 55 колонок, в списке {len(HEADERS)}"
+assert col_letter(len(HEADERS)) == "BC"
 assert col_letter(COL_SCORES_START) == "AI"
 assert col_letter(COL_SCORES_END) == "AM"
 assert col_letter(COL_TOTAL_SCORE) == "AN"
 assert col_letter(COL_RESULT_START) == "AO"
 assert col_letter(COL_RESULT_END) == "AZ"
 assert index_of("status") == 47 and col_letter(47) == "AU"
+assert index_of("source") == COL_SOURCE and col_letter(COL_SOURCE) == "BC"
+assert COL_SOURCE == COL_MANUAL_END + 1

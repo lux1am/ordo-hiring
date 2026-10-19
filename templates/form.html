@@ -340,6 +340,10 @@
     </section>
 
     <input type="hidden" name="telemetry" id="telemetry">
+    <!-- Метка размещения. В разметке пустая: статическая страница собирается
+         заранее и одна на всех, а откуда пришёл кандидат, известно только из
+         адреса конкретного перехода — поле заполняет JS из ?src=, см. ниже. -->
+    <input type="hidden" name="source" id="source">
     <div class="error" id="form-error" hidden></div>
     <button type="submit" id="submit-btn">Отправить анкету</button>
   </form>
@@ -389,6 +393,38 @@ window.submitPayload = function (data) {
   // браузеров срабатывал бы почти на всех.
   var isMobile = (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
                  /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+  // ----------------------- Метка размещения ------------------------------
+  //
+  // Ссылку с ?src=... выдаёт лист «Размещения» — по одной на канал. Значение
+  // приходит из адресной строки, то есть от кого угодно, поэтому чистится:
+  // латиница, цифры, подчёркивание и дефис, нижний регистр, не длиннее
+  // SOURCE_MAX_LEN. Та же чистка стоит и на приёме (cleanSource в Code.gs,
+  // app/source.py) — здесь она для того, чтобы метка в скрытом поле
+  // совпадала с тем, что в итоге попадёт в таблицу.
+  //
+  // Нет параметра — поле остаётся пустым: отклик без метки учитывается
+  // отдельной строкой в листе «Эффективность», и выдумывать ему источник
+  // нельзя.
+  var SOURCE_MAX_LEN = 40;
+
+  function cleanSource(raw) {
+    return String(raw == null ? "" : raw)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "")
+      .slice(0, SOURCE_MAX_LEN);
+  }
+
+  function readSource() {
+    try {
+      return cleanSource(new URLSearchParams(window.location.search).get("src"));
+    } catch (err) {
+      // Разбор адреса не должен стоить кандидату анкеты: без метки она
+      // примется, просто окажется в строке «без метки».
+      return "";
+    }
+  }
 
   // Сервер меряет длину ответа после схлопывания пробелов. Счётчик под
   // полем обязан считать так же, иначе кандидат видел бы одно, а получал
@@ -550,6 +586,13 @@ window.submitPayload = function (data) {
   var form = document.getElementById("form");
   var btn = document.getElementById("submit-btn");
   var formError = document.getElementById("form-error");
+
+  // Метка подставляется при загрузке, а не в момент отправки: так она
+  // уходит любым путём — и через fetch, и обычным POST, — а заодно видна в
+  // разметке страницы, и ссылку из «Размещений» можно проверить глазами,
+  // не отправляя анкету.
+  var sourceField = document.getElementById("source");
+  if (sourceField) sourceField.value = readSource();
 
   var RADIO_REQUIRED_TEXT = "Выберите один вариант";
 

@@ -36,7 +36,7 @@ OUT = ROOT / "apps-script"
 sys.path.insert(0, str(ROOT))
 
 import HEADERS as H  # noqa: E402
-from app.config import HONEYPOT_FIELD  # noqa: E402
+from app.config import FORM_DOMAIN, HONEYPOT_FIELD  # noqa: E402
 
 BANNER = "// СГЕНЕРИРОВАНО apps-script/build_gs.py — не редактировать вручную.\n"
 
@@ -68,6 +68,7 @@ def build_headers() -> str:
         f"const COL_STATUS = {H.index_of('status')};            // AU\n"
         f"const COL_TELEGRAM = {H.index_of('telegram')};           // D\n"
         f"const COL_TOTAL_SCORE = {H.COL_TOTAL_SCORE};        // AN — формула, не трогаем\n"
+        f"const COL_SOURCE = {H.COL_SOURCE};             // BC — метка размещения\n"
         f"const FIRST_DATA_ROW = {H.FIRST_DATA_ROW};\n"
         f"const LAST_PREPARED_ROW = {H.LAST_PREPARED_ROW};\n"
         f"const FORMULA_TOPUP_FROM_ROW = {H.FORMULA_TOPUP_FROM_ROW};\n"
@@ -304,7 +305,11 @@ def build_static() -> str:
 # чего в артефакте нет, при деплое пропадает. CNAME, положенный руками или
 # заведённый только в настройках репозитория, стёрся бы первым же прогоном,
 # а вместе с ним отвалился бы и домен.
-CUSTOM_DOMAIN = "hr.aiordo.ru"
+#
+# Само имя домена берётся из app/config.py: та же строка нужна формуле
+# «Ссылка для размещения» в листе «Размещения», и держать её в двух местах
+# значит однажды раздать Нике ссылку на домен, которого уже нет.
+CUSTOM_DOMAIN = FORM_DOMAIN
 
 
 def build_cname() -> str:

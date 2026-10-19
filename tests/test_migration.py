@@ -1,4 +1,4 @@
-"""Разовые скрипты смены схемы: архив старых строк и запись шапки.
+"""Скрипты, которые ходят в книгу: архив, шапка, карточка, учёт размещений.
 
 Оба ходят в таблицу, поэтому здесь поднят лист в памяти — с теми же
 операциями, что вызывают скрипты. Проверять их «осторожным повторным
@@ -12,10 +12,11 @@ import pytest
 
 import apply_headers
 import archive_old
+import placements
 import sync_questions
-from HEADERS import HEADERS, col_letter
+from HEADERS import FIRST_DATA_ROW, HEADERS, col_letter
 
-# Прежняя раскладка: те же 54 колонки, другие имена стоп-вопросов.
+# Прежняя раскладка: те же колонки, другие имена стоп-вопросов.
 OLD_HEADERS = [
     {
         "stop_1_sdelno": "stop_1_oklad",
@@ -73,6 +74,12 @@ class FakeWorksheet:
         self.spreadsheet = spreadsheet
         self.cells: dict[tuple[int, int], str] = {}
         self.notes: dict[str, str] = {}
+        self.formats: list = []
+        self.conditional: list = []
+        self.frozen = 0
+        # Способ ввода по диапазону: формула, записанная как RAW, легла бы
+        # в ячейку текстом, и лист показывал бы саму формулу.
+        self.input_options: dict[str, str] = {}
         self.hidden = False
         self.appends = 0
         self.id = spreadsheet.next_id() if spreadsheet else 0
@@ -80,6 +87,11 @@ class FakeWorksheet:
         self.validations: list[tuple] = []
 
     # --- служебное -------------------------------------------------------
+    def called(self) -> None:
+        """Одно обращение к API. Их считает книга: у Sheets лимит на минуту."""
+        if self.spreadsheet is not None:
+            self.spreadsheet.writes += 1
+
     def put(self, row: int, col: int, value) -> None:
         text = "" if value is None else str(value)
         if text == "":
@@ -106,6 +118,8 @@ class FakeWorksheet:
         return [self.cells.get((row, c), "") for c in range(1, cols + 1)]
 
     def update(self, values, range_name, value_input_option="RAW"):
+        self.input_options[range_name] = value_input_option
+        self.called()
         top, left, _, _ = parse_range(range_name)
         for dr, line in enumerate(values):
             for dc, value in enumerate(line):
@@ -113,12 +127,14 @@ class FakeWorksheet:
 
     def append_rows(self, values, value_input_option="RAW"):
         self.appends += 1
+        self.called()
         start = self.last_row() + 1
         for dr, line in enumerate(values):
             for dc, value in enumerate(line):
                 self.put(start + dr, 1 + dc, value)
 
     def batch_clear(self, ranges):
+        self.called()
         for a1 in ranges:
             top, left, bottom, right = parse_range(a1)
             for r in range(top, bottom + 1):
@@ -137,6 +153,7 @@ class FakeWorksheet:
 
     def update_notes(self, notes):
         """Пустой текст стирает примечание — так же ведёт себя Sheets."""
+        self.called()
         for cell, text in notes.items():
             if text:
                 self.notes[cell] = text
@@ -145,15 +162,23 @@ class FakeWorksheet:
 
     def resize(self, rows, cols):
         """Ужимая лист, Sheets теряет всё, что осталось за границей."""
+        self.called()
         self.row_count, self.col_count = rows, cols
         self.cells = {
             (r, c): v for (r, c), v in self.cells.items() if r <= rows and c <= cols
         }
 
     def batch_format(self, formats):
-        self.formats = list(formats)
+        self.called()
+        self.formats.extend(formats)
+
+    def format_of(self, range_name: str) -> dict:
+        """Последний формат, заданный этому диапазону."""
+        found = [f["format"] for f in self.formats if f["range"] == range_name]
+        return found[-1] if found else {}
 
     def add_validation(self, range, condition_type, values, **kw):
+        self.called()
         self.validations.append((range, condition_type, tuple(values), kw))
 
 
@@ -161,6 +186,7 @@ class FakeBook:
     def __init__(self):
         self.sheets: dict[str, FakeWorksheet] = {}
         self._ids = 0
+        self.writes = 0
 
     def next_id(self) -> int:
         """Идентификаторы не переиспользуются: удалённый лист не отдаёт свой."""
@@ -182,6 +208,7 @@ class FakeBook:
         return self.sheets[title]
 
     def add_worksheet(self, title, rows, cols):
+        self.writes += 1
         return self.add(title, rows=rows, cols=cols)
 
     def worksheets(self):
@@ -190,19 +217,44 @@ class FakeBook:
     def del_worksheet(self, ws):
         self.sheets.pop(ws.title)
 
+    def fetch_sheet_metadata(self, params=None):
+        """Столько, сколько читает код: id листа и его правила подсветки."""
+        return {
+            "sheets": [
+                {
+                    "properties": {"sheetId": ws.id, "title": ws.title},
+                    "conditionalFormats": list(ws.conditional),
+                }
+                for ws in self.sheets.values()
+            ]
+        }
+
     def batch_update(self, body):
-        """Применяет то, чем пользуется код: видимость и ширину колонок."""
+        """Применяет то, чем пользуется код: видимость, размеры, подсветку."""
+        self.writes += 1
         self.requests = body["requests"]
         for request in self.requests:
             props = request.get("updateSheetProperties", {}).get("properties")
             if props:
-                self.by_id(props["sheetId"]).hidden = props["hidden"]
+                ws = self.by_id(props["sheetId"])
+                if "hidden" in props:
+                    ws.hidden = props["hidden"]
+                grid = props.get("gridProperties", {})
+                if "frozenRowCount" in grid:
+                    ws.frozen = grid["frozenRowCount"]
             dimension = request.get("updateDimensionProperties")
             if dimension:
                 ws = self.by_id(dimension["range"]["sheetId"])
                 ws.widths[dimension["range"]["startIndex"]] = (
                     dimension["properties"]["pixelSize"]
                 )
+            add = request.get("addConditionalFormatRule")
+            if add:
+                ws = self.by_id(add["rule"]["ranges"][0]["sheetId"])
+                ws.conditional.insert(add["index"], add["rule"])
+            drop = request.get("deleteConditionalFormatRule")
+            if drop:
+                self.by_id(drop["sheetId"]).conditional.pop(drop["index"])
 
 
 @pytest.fixture
@@ -344,7 +396,9 @@ def test_rows_without_id_are_kept_and_not_duplicated(book):
 
 def test_clear_ranges_skip_the_formula_column():
     ranges = archive_old.clear_ranges(300)
-    assert ranges == ["A2:AM300", "AO2:BB300"]
+    # Правый диапазон доходит до BC: метка размещения тоже должна уехать в
+    # архив, иначе старый отклик остался бы приписан будущей ссылке.
+    assert ranges == ["A2:AM300", "AO2:BC300"]
     assert col_letter(HEADERS.index("total_score") + 1) == "AN"
     assert not any("AN" in r for r in ranges)
 
@@ -382,6 +436,46 @@ def test_headers_are_idempotent(book):
     assert apply_headers.main([]) == 0
     assert apply_headers.main([]) == 0, "второй запуск не находит расхождений"
     assert data_sheet(book).row_values(1) == HEADERS
+
+
+def test_appended_column_is_written_over_live_rows(book):
+    """Колонка, дописанная в конец, не меняет смысла прежних строк.
+
+    Так в лист приехала метка размещения. Гнать анкеты живых людей в архив
+    ради новой колонки незачем, и --force для этого не нужен.
+    """
+    data = data_sheet(book)
+    # Прежняя шапка без последней колонки — ровно то, что было в книге до
+    # появления метки.
+    data.update(values=[HEADERS[:-1]], range_name="A1")
+    data.put(1, len(HEADERS), "")
+
+    assert apply_headers.main([]) == 0
+    assert data.row_values(1) == HEADERS
+    assert len(archive_old.data_rows(data.get_all_values())) == 3, "строки на месте"
+    assert archive_old.ARCHIVE_TITLE not in book.sheets, "архив не понадобился"
+
+
+def test_renamed_column_still_demands_the_archive(book):
+    """Переименование — другое дело: ячейка под новым именем означала бы не
+    то, что в ней написано."""
+    assert apply_headers.main([]) == 1
+    assert data_sheet(book).row_values(1) == OLD_HEADERS
+
+
+def test_appended_only_looks_at_the_tail():
+    short = HEADERS[:-1]
+    assert apply_headers.appended_only(
+        apply_headers.header_diff(short), short
+    ) is True
+
+    renamed = list(HEADERS)
+    renamed[6] = "stop_1_oklad"
+    assert apply_headers.appended_only(
+        apply_headers.header_diff(renamed), renamed
+    ) is False
+    # Пустая шапка — это не «дописали в конец», это несобранный лист.
+    assert apply_headers.appended_only(apply_headers.header_diff([]), []) is False
 
 
 def test_headers_dry_run_changes_nothing(book):
@@ -459,7 +553,12 @@ def test_card_is_idempotent(book):
     assert sync_questions.main([]) == 0
     assert card_sheet(book).get_all_values() == first
     assert sorted(book.sheets) == sorted(
-        ["Данные", archive_old.ARCHIVE_TITLE, sync_questions.CARD_TITLE]
+        [
+            "Данные",
+            archive_old.ARCHIVE_TITLE,
+            sync_questions.CARD_TITLE,
+            *PLACEMENT_SHEETS,
+        ]
     ), "повторный запуск завёл лишний лист"
 
 
@@ -533,3 +632,242 @@ def test_card_dry_run_touches_nothing(book):
     assert sync_questions.main(["--dry-run"]) == 0
     assert sync_questions.CARD_TITLE not in book.sheets
     assert data_sheet(book).notes == {}
+
+
+# ------------------------- учёт размещений --------------------------------
+#
+# Четыре листа, в двух из которых работает человек. Главное, что здесь
+# проверяется: повторный запуск не трогает заполненное руками и не плодит
+# ни листов, ни правил подсветки.
+
+PLACEMENT_SHEETS = (
+    placements.CHANNELS_SHEET,
+    placements.PLACEMENTS_SHEET,
+    placements.OUTREACH_SHEET,
+    placements.EFFICIENCY_SHEET,
+)
+
+
+def placement_sheet(book) -> FakeWorksheet:
+    return book.sheets[placements.PLACEMENTS_SHEET]
+
+
+def test_all_four_sheets_appear(book):
+    assert sync_questions.main([]) == 0
+    for title in PLACEMENT_SHEETS:
+        assert title in book.sheets, title
+        assert book.sheets[title].cells.get((1, 1)), f"{title}: пустая шапка"
+
+
+def test_headers_are_written_in_the_agreed_order(book):
+    sync_questions.main([])
+    for title, header in (
+        (placements.CHANNELS_SHEET, placements.CHANNELS_HEADER),
+        (placements.PLACEMENTS_SHEET, placements.PLACEMENTS_HEADER),
+        (placements.OUTREACH_SHEET, placements.OUTREACH_HEADER),
+        (placements.EFFICIENCY_SHEET, placements.EFFICIENCY_HEADER),
+    ):
+        assert book.sheets[title].row_values(1) == header, title
+
+
+def test_formula_columns_are_filled_down_the_sheet(book):
+    sync_questions.main([])
+    ws = placement_sheet(book)
+    last = ws.row_count
+
+    assert last == 1 + placements.PLACEMENT_ROWS
+    for row in (FIRST_DATA_ROW, last):
+        assert ws.cells[(row, placements.PLACEMENT_LINK_COL)] == (
+            placements.placement_link_formula(row)
+        )
+        assert ws.cells[(row, placements.PLACEMENT_RESPONSES_COL)] == (
+            placements.placement_responses_formula(row)
+        )
+
+
+def test_formulas_are_written_as_formulas(book):
+    """RAW положил бы в ячейку текст формулы, и лист показывал бы его."""
+    sync_questions.main([])
+    # «Каналы» — справочник без формул: там шапка и ручной ввод.
+    with_formulas = [t for t in PLACEMENT_SHEETS if t != placements.CHANNELS_SHEET]
+    for title in with_formulas:
+        options = book.sheets[title].input_options
+        assert "USER_ENTERED" in options.values(), title
+        header = f"A1:{col_letter(book.sheets[title].col_count)}1"
+        assert options.get(header, "RAW") == "RAW", f"{title}: шапка — обычный текст"
+
+
+def test_manual_columns_survive_a_rebuild(book):
+    """В «Размещениях» и «Личных касаниях» работает человек. Пересборка
+    переписывает только шапку и формулы — иначе она стирала бы его работу."""
+    sync_questions.main([])
+    ws = placement_sheet(book)
+    ws.put(2, placements.PLACEMENT_DATE_COL, "2026-10-12")
+    ws.put(2, placements.PLACEMENT_CHANNEL_COL, "Авито")
+
+    outreach = book.sheets[placements.OUTREACH_SHEET]
+    outreach.put(2, placements.OUTREACH_DATE_COL, "2026-10-12")
+    outreach.put(2, placements.OUTREACH_SENT_COL, "20")
+
+    channels = book.sheets[placements.CHANNELS_SHEET]
+    channels.put(2, 1, "Авито")
+    channels.put(2, 2, "https://avito.ru/vacancy")
+    channels.put(2, 3, "доска вакансий")
+
+    assert sync_questions.main([]) == 0
+
+    assert ws.cells[(2, placements.PLACEMENT_DATE_COL)] == "2026-10-12"
+    assert ws.cells[(2, placements.PLACEMENT_CHANNEL_COL)] == "Авито"
+    assert outreach.cells[(2, placements.OUTREACH_SENT_COL)] == "20"
+    assert channels.cells[(2, 2)] == "https://avito.ru/vacancy"
+
+
+def test_existing_sheet_is_never_shrunk(book):
+    """Лист, заведённый руками, шире и длиннее размеченного. Ужать его
+    значило бы стереть то, что Ника успела в него завести."""
+    big = 1 + placements.PLACEMENT_ROWS + 500
+    book.add(placements.PLACEMENTS_SHEET, rows=big, cols=8)
+    book.sheets[placements.PLACEMENTS_SHEET].put(big - 10, 1, "2026-12-31")
+
+    assert sync_questions.main([]) == 0
+    ws = placement_sheet(book)
+    assert ws.row_count == big
+    assert ws.cells[(big - 10, 1)] == "2026-12-31"
+    assert ws.cells[(big, placements.PLACEMENT_LINK_COL)] == (
+        placements.placement_link_formula(big)
+    ), "формулы должны дойти до конца листа, а не до размеченной строки"
+
+
+def test_short_sheet_grows_to_the_prepared_size(book):
+    book.add(placements.OUTREACH_SHEET, rows=3, cols=2)
+
+    assert sync_questions.main([]) == 0
+    ws = book.sheets[placements.OUTREACH_SHEET]
+    assert ws.row_count == 1 + placements.OUTREACH_ROWS
+    assert ws.col_count >= len(placements.OUTREACH_HEADER)
+
+
+def test_channel_is_a_dropdown_from_the_channels_sheet(book):
+    sync_questions.main([])
+    cell, condition, values, kw = placement_sheet(book).validations[-1]
+
+    letter = col_letter(placements.PLACEMENT_CHANNEL_COL)
+    assert cell == f"{letter}{FIRST_DATA_ROW}:{letter}{1 + placements.PLACEMENT_ROWS}"
+    assert values == (placements.channel_source(1 + placements.CHANNEL_ROWS),)
+    assert kw["strict"] is True, "свободный ввод развалил бы сводку по каналу"
+    assert kw["showCustomUi"] is True
+
+
+def test_efficiency_is_one_formula_in_a2(book):
+    sync_questions.main([])
+    ws = book.sheets[placements.EFFICIENCY_SHEET]
+
+    assert ws.cells[(2, 1)].startswith("=LET(")
+    assert ws.input_options["A2"] == "USER_ENTERED"
+    # Ниже и правее формулы ничего быть не должно: массив разворачивается
+    # сам, и любая занятая ячейка под ним даёт ошибку вместо сводки.
+    assert [rc for rc in ws.cells if rc[0] > 2] == []
+
+
+def test_efficiency_formula_knows_the_real_size_of_the_other_sheets(book):
+    """Границы диапазонов должны совпадать с настоящими листами: по высоте
+    «Размещений» считаются метки, а разъехавшись, сводка посчитает чужие."""
+    posts, touches = 1 + placements.PLACEMENT_ROWS + 7, 1 + placements.OUTREACH_ROWS + 3
+    book.add(placements.PLACEMENTS_SHEET, rows=posts, cols=4)
+    book.add(placements.OUTREACH_SHEET, rows=touches, cols=5)
+    sync_questions.main([])
+
+    formula = book.sheets[placements.EFFICIENCY_SHEET].cells[(2, 1)]
+    assert formula == placements.efficiency_formula(posts, touches)
+
+
+def test_coloring_rules_are_set_once_and_not_piled_up(book):
+    sync_questions.main([])
+    ws = book.sheets[placements.EFFICIENCY_SHEET]
+    assert len(ws.conditional) == 2
+
+    assert sync_questions.main([]) == 0
+    assert len(ws.conditional) == 2, "каждый запуск добавлял бы ещё два правила"
+
+    formulas = [
+        rule["booleanRule"]["condition"]["values"][0]["userEnteredValue"]
+        for rule in ws.conditional
+    ]
+    assert formulas == [placements.HAS_A_RULE, placements.ZERO_RULE]
+
+
+def test_headers_are_frozen_and_bold(book):
+    sync_questions.main([])
+    for title in PLACEMENT_SHEETS:
+        ws = book.sheets[title]
+        assert ws.frozen == 1, title
+        last = col_letter(ws.col_count if title != placements.EFFICIENCY_SHEET
+                          else placements.EFFICIENCY_COLS)
+        assert ws.format_of(f"A1:{last}1").get("textFormat") == {"bold": True}, title
+
+
+def test_dates_are_formatted_as_dates(book):
+    """Иначе в колонке стояли бы числа вроде 46 000, а метка дня не собралась."""
+    sync_questions.main([])
+    ws = book.sheets[placements.OUTREACH_SHEET]
+    letter = col_letter(placements.OUTREACH_DATE_COL)
+    fmt = ws.format_of(f"{letter}{FIRST_DATA_ROW}:{letter}{ws.row_count}")
+    assert fmt["numberFormat"]["type"] == "DATE"
+
+
+def test_notes_are_put_on_the_headers(book):
+    sync_questions.main([])
+    notes = placement_sheet(book).notes
+    assert "C1" in notes and "вниз" in notes["C1"]
+
+
+def test_placement_sheets_are_visible(book):
+    add_hand_made_sheets(book)
+    sync_questions.main([])
+    for title in PLACEMENT_SHEETS:
+        assert book.sheets[title].hidden is False, title
+
+
+def test_dry_run_creates_no_placement_sheets(book):
+    assert sync_questions.main(["--dry-run"]) == 0
+    for title in PLACEMENT_SHEETS:
+        assert title not in book.sheets, title
+
+
+def test_two_runs_in_a_row_fit_the_api_quota(book):
+    """Sheets даёт шестьдесят записей в минуту на пользователя.
+
+    Скрипт идемпотентный, и его запускают повторно сразу за первым разом —
+    посмотреть, что получилось, и собрать заново. Два прогона подряд не
+    должны упираться в 429: на полпути это оставило бы листы недособранными.
+    """
+    add_hand_made_sheets(book)
+
+    book.writes = 0
+    assert sync_questions.main([]) == 0
+    first = book.writes
+
+    book.writes = 0
+    assert sync_questions.main([]) == 0
+    second = book.writes
+
+    assert first <= 35, f"обращений к API за первый прогон: {first}"
+    assert second < first, "повторный прогон не должен заводить листы заново"
+    assert first + second <= 60, f"два прогона подряд: {first + second}"
+
+
+def test_formatting_of_a_sheet_is_two_requests(book):
+    """Шапка, формат даты, ширина колонок и подсветка идут вместе.
+
+    По отдельности они стоили бы четырёх запросов на лист — шестнадцати на
+    четыре листа, и это только оформление.
+    """
+    sync_questions.main([])
+    ws = book.sheets[placements.EFFICIENCY_SHEET]
+
+    ranges = [f["range"] for f in ws.formats]
+    assert ranges == [
+        f"A1:{col_letter(placements.EFFICIENCY_COLS)}1",
+        f"A{FIRST_DATA_ROW}:A{ws.row_count}",
+        f"G{FIRST_DATA_ROW}:G{ws.row_count}",
+    ], "форматы ячеек должны уйти одним batch_format"

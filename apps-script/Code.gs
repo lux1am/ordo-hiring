@@ -12,8 +12,9 @@
  * руками: Headers.gs, Questions.gs и Index.html собираются из HEADERS.py,
  * questions.json и templates/form.html скриптом apps-script/build_gs.py.
  *
- * Зона записи — A..AH плюс AP (ответы о мотивации), AS (флаги) и AU (статус).
- * Колонка AN (total_score) не трогается: там формула таблицы.
+ * Зона записи — A..AH плюс AP (ответы о мотивации), AS (флаги), AU (статус)
+ * и BC (метка размещения). Колонка AN (total_score) не трогается: там
+ * формула таблицы.
  */
 
 // Боевой адрес веб-приложения, тот самый, что раздан кандидатам.
@@ -45,6 +46,11 @@ var GITHUB_REPO = 'lux1am/ordo-hiring';
 var GITHUB_WORKFLOW = 'worker.yml';
 var GITHUB_REF = 'main';
 var GITHUB_TOKEN_PROPERTY = 'GITHUB_TOKEN';
+
+// Метка размещения приходит из ?src= в адресе, то есть от кого угодно.
+// Предел продублирован из app/source.py; совпадение чистки с Python и с
+// общим JS формы закреплено тестом test_clean_source_matches_python.
+var SOURCE_MAX_LEN = 40;
 
 var STATUS_NEW = 'new';
 var STATUS_DUPLICATE = 'duplicate';
@@ -462,6 +468,22 @@ function normalize(text) {
 }
 
 /**
+ * Метка размещения в том виде, в каком её можно положить в таблицу.
+ *
+ * Оставляем латиницу, цифры, подчёркивание и дефис, приводим к нижнему
+ * регистру и обрезаем по длине. Всё прочее выбрасывается: метка —
+ * техническое слово из листа «Размещения», а не текст от человека.
+ * Чистка та же, что в app/source.py и в общем JS формы.
+ */
+function cleanSource(raw) {
+  return String(raw == null ? '' : raw)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+    .slice(0, SOURCE_MAX_LEN);
+}
+
+/**
  * Серверная валидация. Последний рубеж: форма проверяет то же самое до
  * отправки, но запрос может прийти и в обход неё.
  *
@@ -497,6 +519,10 @@ function validate(params) {
     errors.resume_url = 'Слишком длинная ссылка';
   }
   data.resume_url = url;
+
+  // Метка размещения ошибкой быть не может: её не вводят руками, и анкета
+  // без метки — обычное дело (прямой переход по ссылке без ?src=).
+  data.source = cleanSource(params.source);
 
   data.pdn_consent = String(params.pdn_consent || '') !== '';
   if (!data.pdn_consent) {
@@ -678,11 +704,16 @@ function writeSubmission(data, telemetry, flags) {
     sheet.getRange(row, COL_FLAGS).setValue(flags.join(', '));
     sheet.getRange(row, COL_STATUS)
       .setValue(duplicate ? STATUS_DUPLICATE : STATUS_NEW);
+    // Метка идёт отдельной ячейкой: в анкетной зоне A..AH места под неё
+    // нет, а сдвигать зону нельзя — на её границы опирается формула в AN.
+    sheet.getRange(row, COL_SOURCE).setValue(data.source);
 
     if (duplicate) {
       Logger.log('строка ' + row + ': дубль по телеграму ' + data.telegram);
     } else {
-      Logger.log('анкета записана в строку ' + row + ', флаги: ' + (flags.join(', ') || 'нет'));
+      Logger.log('анкета записана в строку ' + row +
+                 ', метка: ' + (data.source || 'нет') +
+                 ', флаги: ' + (flags.join(', ') || 'нет'));
     }
     SpreadsheetApp.flush();
   } finally {

@@ -138,6 +138,7 @@ def test_headers_gs_matches_python():
     assert const("COL_AI_MARKERS") == index_of("ai_markers")
     assert const("COL_STATUS") == index_of("status")
     assert const("COL_TOTAL_SCORE") == COL_TOTAL_SCORE
+    assert const("COL_SOURCE") == index_of("source")
     assert const("FIRST_DATA_ROW") == FIRST_DATA_ROW
 
 
@@ -152,6 +153,24 @@ def test_submit_writes_the_answers_cell():
     write = re.search(r"function writeSubmission\(.*?\n\}", CODE_GS, re.S).group(0)
     assert "getRange(row, COL_AI_MARKERS)" in write
     assert "packMarkers(data.profile, [])" in write
+
+
+def test_submit_writes_the_source_label():
+    """Метка размещения пишется отдельной ячейкой BC, а не внутри A..AH."""
+    write = re.search(r"function writeSubmission\(.*?\n\}", CODE_GS, re.S).group(0)
+    assert "getRange(row, COL_SOURCE).setValue(data.source)" in write
+
+    validate = re.search(r"function validate\(params\).*?\n\}", CODE_GS, re.S).group(0)
+    assert "data.source = cleanSource(params.source)" in validate, (
+        "метку нужно вычистить на приёме: поле скрытое, прислать могут что угодно"
+    )
+
+
+def test_source_column_is_generated_not_handwritten():
+    from HEADERS import COL_SOURCE
+
+    headers_gs = (GS / "Headers.gs").read_text(encoding="utf-8")
+    assert f"const COL_SOURCE = {COL_SOURCE};" in headers_gs
 
 
 def test_total_score_column_is_never_written():

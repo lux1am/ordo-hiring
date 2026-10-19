@@ -29,9 +29,12 @@ class FakeSheets:
         self.next_row += 1
         return row
 
-    def write_form(self, row, values, flags, status=STATUS_NEW, markers=""):
+    def write_form(
+        self, row, values, flags, status=STATUS_NEW, markers="", source=""
+    ):
         self.rows[row] = {
-            "values": values, "flags": flags, "status": status, "markers": markers,
+            "values": values, "flags": flags, "status": status,
+            "markers": markers, "source": source,
         }
 
     def write_result(self, row, scores, result):
@@ -86,6 +89,34 @@ def test_accepted_and_queued(sheet):
     assert row["values"][HEADERS.index("fio")] == "Иванов Иван Иванович"
     assert row["values"][HEADERS.index("pdn_consent")] == "Да"
     assert sheet.processed == 2, "обработка должна быть поставлена в очередь"
+
+
+def test_source_label_reaches_the_sheet(sheet):
+    """Метку подставляет форма из ?src=; сервер чистит её ещё раз."""
+    with TestClient(main.app) as c:
+        c.post("/submit", data=payload(source="P002"))
+
+    assert sheet.rows[2]["source"] == "p002"
+
+
+def test_submission_without_a_label_keeps_the_cell_empty(sheet):
+    """Прямой переход по ссылке без ?src= — обычное дело, не ошибка."""
+    with TestClient(main.app) as c:
+        r = c.post("/submit", data=payload())
+
+    assert r.status_code == 200
+    assert sheet.rows[2]["source"] == ""
+
+
+def test_garbage_label_does_not_reach_the_sheet(sheet):
+    """Поле скрытое, подменить его может кто угодно — чистка обязательна."""
+    with TestClient(main.app) as c:
+        r = c.post("/submit", data=payload(source="<b>канал</b> " + "x" * 80))
+
+    assert r.status_code == 200
+    # От разметки остаются только буквы тегов, кириллица выброшена целиком,
+    # остаток обрезан по сороковому знаку.
+    assert sheet.rows[2]["source"] == "bb" + "x" * 38
 
 
 def test_honeypot_is_silently_dropped(sheet):

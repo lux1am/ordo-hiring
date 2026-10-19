@@ -65,11 +65,18 @@ OTHER_OPTION = next(
 )
 
 
+# По этой приставке отказ по стоп-вопросам отличают от всего остального —
+# и формулы листа «Эффективность», и еженедельный отчёт. Поэтому она
+# константа: перепиши её в тексте, и обе сводки молча покажут нули.
+REJECTED_PREFIX = "Не проходит: "
+ACCEPTED_TEXT = "Все условия приняты"
+
+
 def conditions_ru(rejected_fields: list[str]) -> str:
     if not rejected_fields:
-        return "Все условия приняты"
+        return ACCEPTED_TEXT
     names = [CONDITION_NAMES.get(f, f) for f in rejected_fields]
-    return "Не проходит: " + ", ".join(names)
+    return REJECTED_PREFIX + ", ".join(names)
 
 
 def decision_ru(verdict: str, is_manual: bool = False) -> str:

@@ -25,10 +25,10 @@ SHORT_ANSWER = "Иван, за 15 минут покажу, как снизить
 
 
 class SharedSheet:
-    """Один лист на 54 колонки: в него пишет и /submit, и обработчик."""
+    """Один лист на все колонки: в него пишет и /submit, и обработчик."""
 
     def __init__(self):
-        self.cells = [""] * 54
+        self.cells = [""] * len(HEADERS)
         self.cells[HEADERS.index("total_score")] = "=ФОРМУЛА"
         self.result_writes = 0
 
@@ -39,12 +39,15 @@ class SharedSheet:
     def telegram_exists(self, telegram):
         return False
 
-    def write_form(self, row, values, flags, status=STATUS_NEW, markers=""):
+    def write_form(
+        self, row, values, flags, status=STATUS_NEW, markers="", source=""
+    ):
         for i, v in enumerate(values):
             self.cells[i] = v
         self.cells[HEADERS.index("ai_markers")] = markers
         self.cells[HEADERS.index("flags")] = flags
         self.cells[HEADERS.index("status")] = status
+        self.cells[HEADERS.index("source")] = source
 
     # --- вызывается из pipeline (обработка) ---
     def read_status(self, row):
