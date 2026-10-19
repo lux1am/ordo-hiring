@@ -48,26 +48,29 @@ from app.config import (
     REPORT_MODEL,
     TELEGRAM_BOT_TOKEN,
     TZ_OFFSET_HOURS,
+    Recipient,
     missing_secrets,
     setup_logging,
-    telegram_chat_ids,
+    telegram_recipients,
 )
-from app.llm import client, text_of
+from app.llm import client, parse_json, text_of
 from app.retry import call_with_backoff
 
 log = logging.getLogger("weekly_report")
 
 TELEGRAM_API = "https://api.telegram.org"
 
-# Предел сообщения в Телеграме — 4096 знаков. Режем с запасом и по абзацам:
-# отчёт, разорванный посередине строки с числом, читать невозможно.
-MESSAGE_LIMIT = 3800
+# Разметка HTML, а не Markdown: таблицы Телеграм не рендерит ни в одной из
+# них, и колонки в сводке держатся пробелами внутри <pre>. Всё, что приходит
+# извне — названия каналов, текст модели, — экранируется в app/report.py.
+PARSE_MODE = "HTML"
 
-MODEL_FAILED_LINE = (
-    "Выводы собрать не удалось: модель не ответила. Цифры выше посчитаны "
-    "кодом и верны."
-)
-SEPARATOR = "—" * 20
+MODEL_FAILED_LINE = "Выводы собрать не удалось."
+
+# Слова, по которым отказ узнаётся как «дело в теме, а не в чате». Телеграм
+# отвечает то «message thread not found», то «TOPIC_CLOSED» — общего кода у
+# этих ответов нет, есть только 400 и слово про тему.
+TOPIC_MARKERS = ("thread", "topic")
 
 
 def now_local() -> datetime:
@@ -145,11 +148,17 @@ def load_prompt() -> str:
     return (BASE_DIR / "prompts" / "report.md").read_text(encoding="utf-8")
 
 
-def conclusions(numbers: str) -> str:
-    """Выводы и вопросы от модели. Пустая строка — значит не получилось."""
+def conclusions(numbers: str) -> tuple[str, str]:
+    """Два раздела выводов от модели: «Нике» и «По вакансии».
+
+    Модель отвечает объектом {"nika": "...", "vacancy": "..."} — просить у
+    неё разметку незачем, заголовки ставит код. Не разобралось или не
+    ответила — оба раздела пустые, и отчёт уходит одними цифрами: цифры
+    важнее формулировок.
+    """
     if not ANTHROPIC_API_KEY:
         log.warning("ANTHROPIC_API_KEY не задан — отчёт уйдёт одними цифрами")
-        return ""
+        return "", ""
     try:
         response = call_with_backoff(
             lambda: client().messages.create(
@@ -160,43 +169,31 @@ def conclusions(numbers: str) -> str:
             ),
             label="отчёт",
         )
-        return text_of(response).strip()
+        parsed = parse_json(text_of(response))
+        return str(parsed.get("nika") or ""), str(parsed.get("vacancy") or "")
     except Exception:
         # Сбой модели не отменяет отчёт: цифры посчитаны и уйдут без неё.
         log.exception("модель не собрала выводы — отправляю одни цифры")
-        return ""
+        return "", ""
 
 
-def build_message(numbers: str, text: str, period_title: str) -> str:
-    """Сообщение целиком: заголовок, цифры от кода, выводы от модели."""
-    tail = text or MODEL_FAILED_LINE
-    return f"Отчёт по подбору за неделю {period_title}\n\n{numbers}\n\n{SEPARATOR}\n\n{tail}"
+def build_message(cur, prev, nika: str = "", vacancy: str = "") -> str:
+    """Сообщение целиком. Цифры собирает код, выводы вписываются в остаток.
+
+    Не ответила модель — на её месте одна строка об этом: читатель должен
+    знать, что выводов нет, а не думать, что их не было о чём написать.
+    """
+    if not nika and not vacancy:
+        tail = f"\n\n{MODEL_FAILED_LINE}"
+        # Место под эту строку вычитается из потолка заранее: прибавленная
+        # после сборки, она однажды вынесла бы сообщение за предел.
+        return report.message(
+            cur, prev, limit=report.MESSAGE_LIMIT - len(tail)
+        ) + tail
+    return report.message(cur, prev, nika, vacancy)
 
 
 # ------------------------------- отправка ---------------------------------
-
-def chunks(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
-    """Разбивка по абзацам: строка с числом не должна рваться пополам."""
-    out: list[str] = []
-    current = ""
-    for paragraph in text.split("\n\n"):
-        candidate = paragraph if not current else current + "\n\n" + paragraph
-        if len(candidate) <= limit:
-            current = candidate
-            continue
-        if current:
-            out.append(current)
-        # Абзац, который и сам не влезает, режем по строкам.
-        while len(paragraph) > limit:
-            cut = paragraph.rfind("\n", 0, limit)
-            cut = cut if cut > 0 else limit
-            out.append(paragraph[:cut])
-            paragraph = paragraph[cut:].lstrip("\n")
-        current = paragraph
-    if current:
-        out.append(current)
-    return out or [""]
-
 
 def post(method: str, payload: dict) -> dict:
     """Запрос к Bot API. Вынесен отдельно — его подменяют тесты."""
@@ -210,36 +207,105 @@ def post(method: str, payload: dict) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
-def send_to(chat_id: str, text: str) -> bool:
-    """Отправка одному получателю. Форматирования нет намеренно: в отчёте
-    есть и подчёркивания, и звёздочки, и разметка Телеграма споткнулась бы
-    на них, вернув ошибку вместо сообщения."""
-    for part in chunks(text):
-        try:
-            answer = post(
-                "sendMessage",
-                {"chat_id": chat_id, "text": part, "disable_web_page_preview": True},
-            )
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", "replace")[:300]
-            log.error("получатель %s: Телеграм ответил %s — %s", chat_id, e.code, body)
-            return False
-        except Exception:
-            log.exception("получатель %s: отправка не удалась", chat_id)
-            return False
+def payload_for(recipient: Recipient, text: str) -> dict:
+    """Тело запроса к sendMessage. Тема группы — отдельным полем."""
+    body = {
+        "chat_id": recipient.chat_id,
+        "text": text,
+        "parse_mode": PARSE_MODE,
+        "disable_web_page_preview": True,
+    }
+    if recipient.thread_id is not None:
+        body["message_thread_id"] = recipient.thread_id
+    return body
 
-        if not answer.get("ok"):
-            log.error("получатель %s: Телеграм отказал — %s", chat_id, answer)
-            return False
-    log.info("получатель %s: отчёт отправлен", chat_id)
+
+def describe(recipient: Recipient) -> str:
+    """Получатель для лога: «-1004367079334, тема 12»."""
+    if recipient.thread_id is None:
+        return recipient.chat_id
+    return f"{recipient.chat_id}, тема {recipient.thread_id}"
+
+
+def attempt(recipient: Recipient, text: str) -> tuple[bool, str, int]:
+    """Одна попытка отправки: (удалось, описание ошибки, код ответа).
+
+    Логов здесь нет намеренно: решение, ошибка это или повод повторить,
+    принимается уровнем выше — и пишет в лог оно же, по одной строке на
+    получателя, а не по одной на попытку.
+    """
+    try:
+        answer = post("sendMessage", payload_for(recipient, text))
+    except urllib.error.HTTPError as e:
+        # В теле отказа Телеграм объясняет причину — она и нужна.
+        return False, e.read().decode("utf-8", "replace")[:300], e.code
+    except Exception as err:
+        return False, repr(err), 0
+
+    if not answer.get("ok"):
+        return (
+            False,
+            str(answer.get("description") or answer),
+            int(answer.get("error_code") or 0),
+        )
+    return True, "", 200
+
+
+def is_topic_error(error: str, code: int) -> bool:
+    """Отказ из-за темы, а не из-за чата?
+
+    Формулировки у Телеграма разные — «message thread not found»,
+    «TOPIC_CLOSED», «TOPIC_DELETED», — общее у них то, что это 400 и в
+    описании есть слово про тему. Код 0 — это отказ без кода (оборванная
+    связь, странный ответ прокси): если и в нём говорится про тему, повтор
+    без неё всё равно уместен.
+    """
+    if code not in (0, 400):
+        return False
+    low = error.lower()
+    return any(marker in low for marker in TOPIC_MARKERS)
+
+
+def send_to(recipient: Recipient, text: str) -> bool:
+    """Отправка одному получателю. Сообщение целиком, одним запросом:
+    потолок в 1500 знаков заведомо меньше предела Телеграма, а резать
+    HTML посередине тега нельзя — он вернул бы ошибку разбора.
+
+    Отказ из-за темы не считается концом: тот же чат получит отчёт в общий
+    поток. Отчёт не в своей ветке хуже отчёта в своей, но несравнимо лучше
+    отчёта, которого нет, — а неверный или закрытый номер темы обнаружится
+    ровно в понедельник утром, когда править его некому.
+    """
+    who = describe(recipient)
+    ok, error, code = attempt(recipient, text)
+
+    if not ok and recipient.thread_id is not None and is_topic_error(error, code):
+        log.warning(
+            "получатель %s: Телеграм отказал из-за темы (%s) — повторяю без неё",
+            who, error,
+        )
+        ok, error, code = attempt(Recipient(recipient.chat_id), text)
+        if ok:
+            log.warning(
+                "получатель %s: отчёт ушёл в общий поток — тема %s не принята, "
+                "поправьте номер в TELEGRAM_CHAT_IDS",
+                recipient.chat_id, recipient.thread_id,
+            )
+            return True
+
+    if not ok:
+        log.error("получатель %s: отправка не удалась (%s) — %s", who, code, error)
+        return False
+
+    log.info("получатель %s: отчёт отправлен", who)
     return True
 
 
 def broadcast(text: str) -> tuple[int, int]:
     """Рассылка всем. Сбой одного получателя не отменяет остальных."""
     sent = failed = 0
-    for chat_id in telegram_chat_ids():
-        if send_to(chat_id, text):
+    for recipient in telegram_recipients():
+        if send_to(recipient, text):
             sent += 1
         else:
             failed += 1
@@ -269,7 +335,7 @@ def main(argv: list[str]) -> int:
         log.error("не заданы переменные окружения: %s", ", ".join(missing))
         return 2
 
-    recipients = telegram_chat_ids()
+    recipients = telegram_recipients()
     if not args.dry_run:
         if not TELEGRAM_BOT_TOKEN:
             log.error("не задан TELEGRAM_BOT_TOKEN — отправлять нечем")
@@ -284,11 +350,18 @@ def main(argv: list[str]) -> int:
         log.exception("не удалось собрать цифры отчёта")
         return 1
 
-    text = "" if args.no_model else conclusions(numbers)
-    message = build_message(numbers, text, current.period.title())
+    nika, vacancy = ("", "") if args.no_model else conclusions(numbers)
+    message = build_message(current, previous, nika, vacancy)
+    log.info(
+        "сообщение собрано: %d знаков из %d", len(message), report.MESSAGE_LIMIT
+    )
 
     if args.dry_run:
+        # Печатается и то, что уйдёт в Телеграм, и то, что видела модель:
+        # первое — чтобы посмотреть на отчёт, второе — чтобы понять, из
+        # каких чисел он собран.
         print("\n" + message + "\n", flush=True)
+        print("--- что получила модель ---\n" + numbers + "\n", flush=True)
         log.info(
             "сухой прогон: ничего не отправлено, получателей в настройках %d",
             len(recipients),
@@ -297,7 +370,7 @@ def main(argv: list[str]) -> int:
 
     sent, failed = broadcast(message)
     log.info("отчёт за %s: отправлен %d, не доставлен %d",
-             current.period.title(), sent, failed)
+             report.period_title(current.period), sent, failed)
     if sent == 0:
         log.error("отчёт не получил никто")
         return 1

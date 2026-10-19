@@ -6,8 +6,11 @@ import sys
 from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
+from typing import NamedTuple
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+log = logging.getLogger(__name__)
 
 # --- Модели ---------------------------------------------------------------
 SCORER_MODEL = os.getenv("SCORER_MODEL", "claude-sonnet-4-6")
@@ -27,6 +30,10 @@ WORKSHEET_NAME = os.getenv("WORKSHEET_NAME", "Данные")
 # Бот и получатели еженедельного отчёта. Получателей несколько, поэтому
 # список — через запятую одной переменной: добавить человека в рассылку
 # должно быть правкой секрета, а не кода.
+#
+# Получатель записывается как «-1004367079334» или «-1004367079334:12», где
+# после двоеточия — номер темы супергруппы. Тема важна: в рабочей группе
+# отчёт должен падать в свою ветку, а не в общий поток.
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_IDS_RAW = os.getenv("TELEGRAM_CHAT_IDS", "")
 
@@ -107,14 +114,48 @@ def plan_outreach(start: date, end: date) -> int:
     return PLAN_OUTREACH_DAY * working_days(start, end)
 
 
-def telegram_chat_ids() -> list[str]:
-    """Получатели отчёта: «123,-100456» -> ["123", "-100456"].
+class Recipient(NamedTuple):
+    """Куда уходит отчёт: чат и, если он с темами, номер темы."""
+
+    chat_id: str
+    thread_id: int | None = None
+
+
+def telegram_recipients() -> list[Recipient]:
+    """Получатели отчёта из одной переменной через запятую.
+
+        «123, -100456, -1004367079334:12»
+        -> [Recipient("123"), Recipient("-100456"),
+            Recipient("-1004367079334", 12)]
 
     Пробелы и пустые куски отбрасываются: список правят руками в секрете
     репозитория, и лишняя запятая в конце не должна превращаться в
     получателя с пустым именем.
+
+    Номер темы, который не разобрался, не отменяет получателя: отчёт уйдёт
+    в общий поток группы. Потерять отчёт целиком из-за опечатки в номере
+    темы хуже, чем прислать его не в ту ветку, — и в логе об этом сказано.
     """
-    return [part.strip() for part in TELEGRAM_CHAT_IDS_RAW.split(",") if part.strip()]
+    out: list[Recipient] = []
+    for part in TELEGRAM_CHAT_IDS_RAW.split(","):
+        part = part.strip()
+        if not part:
+            continue
+
+        chat, _, thread = part.partition(":")
+        chat, thread = chat.strip(), thread.strip()
+        if not chat:
+            log.warning("в TELEGRAM_CHAT_IDS кусок «%s» без чата — пропускаю", part)
+            continue
+
+        if thread and not thread.isdigit():
+            log.warning(
+                "у получателя %s не разобрался номер темы «%s» — отправлю в "
+                "общий поток группы", chat, thread,
+            )
+            thread = ""
+        out.append(Recipient(chat, int(thread) if thread else None))
+    return out
 
 
 def setup_logging() -> None:

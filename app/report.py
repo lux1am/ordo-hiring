@@ -616,3 +616,227 @@ def numbers_text(cur: WeekStats, prev: WeekStats) -> str:
         )
 
     return "\n".join(out)
+
+
+# ============================ сообщение в Телеграм ========================
+#
+# То, что уходит в Телеграм, — не тот же текст, что уходит модели. Модель
+# получает всё, что посчитано (numbers_text выше): по ней она и видит, какой
+# канал пуст и в какой день не работали. Человек получает короткую сводку и
+# два коротких раздела выводов — остальное он посмотрит в «Эффективности».
+#
+# Разметка HTML, а не Markdown: таблицы Телеграм не рендерит ни в том, ни в
+# другом, и колонки держатся только пробелами внутри <pre>. Всё, что
+# приходит извне — названия каналов, текст модели, — экранируется: одна
+# угловая скобка в названии канала превратила бы сообщение в ошибку 400.
+
+# Жёсткий потолок сообщения. Телеграм режет на 4096, но нам важна
+# читаемость: отчёт читают с телефона в понедельник утром.
+MESSAGE_LIMIT = 1500
+
+MONTHS = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+MONTHS_SHORT = (
+    "янв", "фев", "мар", "апр", "мая", "июн",
+    "июл", "авг", "сен", "окт", "ноя", "дек",
+)
+
+UP, DOWN = "↑", "↓"
+DOT = " · "
+ELLIPSIS = "…"
+
+# Сколько названий каналов влезает в строку «Пусто». Остальные — числом:
+# список на двадцать каналов съел бы весь потолок сообщения.
+CHANNELS_IN_LINE = 5
+
+# Предел длины названия канала в строке. Названия заводит человек, и
+# «Телеграм-канал «Работа в продажах Москва и область»» — не редкость.
+CHANNEL_NAME_LIMIT = 28
+
+# Предел на раздел выводов. Промпт просит две коротких фразы, но
+# рассчитывать на послушание модели нельзя: разошедшийся первый раздел
+# иначе съел бы весь бюджет, и второго в сообщении не осталось бы вовсе.
+SECTION_LIMIT = 300
+
+LABEL_WIDTH = 13   # ширина колонки с подписью внутри <pre>
+
+NIKA_TITLE = "Нике"
+VACANCY_TITLE = "По вакансии"
+
+
+def esc(text) -> str:
+    """Экранирование для parse_mode=HTML. Телеграму нужны ровно эти три."""
+    return (
+        str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+
+
+def period_title(period: Period) -> str:
+    """«13–19 октября», а через месяц — «28 сентября – 4 октября»."""
+    start, end = period.start, period.end
+    if start.month == end.month:
+        return f"{start.day}–{end.day} {MONTHS[end.month - 1]}"
+    return (
+        f"{start.day} {MONTHS[start.month - 1]} – {end.day} {MONTHS[end.month - 1]}"
+    )
+
+
+def short_days(days: list[date]) -> str:
+    """«14, 15 окт». Месяц называется один раз, пока он один."""
+    if not days:
+        return ""
+    if len({day.month for day in days}) == 1:
+        numbers = ", ".join(str(day.day) for day in days)
+        return f"{numbers} {MONTHS_SHORT[days[0].month - 1]}"
+    return ", ".join(f"{day.day} {MONTHS_SHORT[day.month - 1]}" for day in days)
+
+
+def arrow(current, previous, digits: int = 0) -> str:
+    """Дельта одним знаком: «↓6». Нечего показать — пустая строка.
+
+    Ноль дельтой не считается: «↑0» в сводке — шум, а не новость.
+    """
+    if current is None or previous is None or current == previous:
+        return ""
+    sign = UP if current > previous else DOWN
+    return f" {sign}{num(abs(current - previous), digits)}"
+
+
+def short_name(text: str, limit: int = CHANNEL_NAME_LIMIT) -> str:
+    """Название канала, укороченное до предела."""
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + ELLIPSIS
+
+
+def listing(items: list[str], limit: int = CHANNELS_IN_LINE) -> str:
+    """Перечисление с хвостом числом: «А, Б, В и ещё 4»."""
+    names = [short_name(item) for item in items[:limit]]
+    tail = f" и ещё {len(items) - limit}" if len(items) > limit else ""
+    return ", ".join(names) + tail
+
+
+def plan_tail(plan: int | None) -> str:
+    """«/ 100» рядом с фактом. Плана нет — и хвоста нет."""
+    return f" / {plan}" if plan is not None else ""
+
+
+def numbers_block(cur: WeekStats, prev: WeekStats) -> str:
+    """Цифры недели для <pre>-блока. Колонки держатся пробелами.
+
+    Подписи выровнены по LABEL_WIDTH, а числа плана — по самому длинному из
+    трёх, чтобы «/» стояли друг под другом при любых величинах.
+    """
+    # Факты выравниваются по самому длинному из трёх: тогда «/» и скобки
+    # стоят друг под другом при любых величинах.
+    width = max(len(str(f)) for f in (cur.placements, cur.outreach_sent, cur.responses))
+
+    def row(label: str, fact: int, tail: str = "") -> str:
+        return f"{label.ljust(LABEL_WIDTH)}{str(fact).rjust(width)}{tail}"
+
+    sources = [
+        f"каналы {cur.channel_responses}",
+        f"личеки {cur.outreach_responses}",
+    ]
+    # Эти два показываются только когда есть: сумма в скобках обязана
+    # сходиться с общим числом откликов, иначе ей незачем верить.
+    if cur.unlabelled:
+        sources.append(f"без метки {cur.unlabelled}")
+    unknown = sum(cur.unknown_labels.values())
+    if unknown:
+        sources.append(f"чужая метка {unknown}")
+
+    lines = [
+        row(
+            "Размещений",
+            cur.placements,
+            plan_tail(cur.plan_placements) + arrow(cur.placements, prev.placements),
+        ),
+        row(
+            "Личных",
+            cur.outreach_sent,
+            plan_tail(cur.plan_outreach) + arrow(cur.outreach_sent, prev.outreach_sent),
+        ),
+        row(
+            "Откликов",
+            cur.responses,
+            arrow(cur.responses, prev.responses) + "  (" + DOT.join(sources) + ")",
+        ),
+        "",
+    ]
+
+    if cur.responses == 0:
+        # Пустая неделя — тоже результат, и сказано об этом прямо.
+        lines.append(NO_RESPONSES_LINE)
+    else:
+        levels = DOT.join(
+            f"{level} {cur.verdicts.get(level, 0)}" for level in ("A", "B", "C")
+        )
+        if cur.average is not None:
+            levels += DOT + f"средний балл {num(cur.average, 1)}"
+        lines.append(levels)
+        lines.append(f"Отсев на условиях: {cur.rejected}")
+
+    # Эти две строки печатаются, только если есть что сказать.
+    tail = []
+    if cur.empty_channels:
+        tail.append("Пусто: " + listing(cur.empty_channels))
+    if cur.silent_days:
+        tail.append("Тишина: " + short_days(cur.silent_days))
+    if tail:
+        lines.append("")
+        lines += tail
+
+    return "\n".join(lines)
+
+
+def fit(text: str, budget: int) -> str:
+    """Обрезка по слову с отбивкой. Не влезает ничего — пустая строка.
+
+    Режутся выводы модели, и только они: цифры в сообщении неприкосновенны,
+    из-за них отчёт и читают.
+    """
+    text = " ".join(str(text).split())
+    if len(text) <= budget:
+        return text
+    if budget < 40:
+        return ""
+    cut = text[: budget - len(ELLIPSIS)]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > 20 else cut).rstrip(" ,.;:") + ELLIPSIS
+
+
+def section(title: str, text: str) -> str:
+    return f"<b>{title}</b>\n{esc(text)}"
+
+
+def message(
+    cur: WeekStats,
+    prev: WeekStats,
+    nika: str = "",
+    vacancy: str = "",
+    limit: int = MESSAGE_LIMIT,
+) -> str:
+    """Готовое сообщение: заголовок, цифры, два раздела выводов.
+
+    Потолок соблюдается за счёт выводов: сначала собираются цифры, потом в
+    остаток бюджета вписывается текст модели — сперва «Нике», затем «По
+    вакансии». Не влезло — раздела в сообщении нет.
+    """
+    head = f"<b>Подбор {DOT.strip()} {period_title(cur.period)}</b>"
+    body = f"{head}\n\n<pre>{esc(numbers_block(cur, prev))}</pre>"
+
+    for title, text in ((NIKA_TITLE, nika), (VACANCY_TITLE, vacancy)):
+        text = " ".join(str(text or "").split())
+        if not text:
+            continue
+        # Бюджет считается по готовому сообщению: экранирование удлиняет
+        # текст, и считать его по сырому значило бы однажды выйти за потолок.
+        scaffold = len(section(title, "")) + len("\n\n")
+        room = min(SECTION_LIMIT, limit - len(body) - scaffold)
+        text = fit(text, room)
+        if text:
+            body += "\n\n" + section(title, text)
+
+    return body

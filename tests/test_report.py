@@ -9,7 +9,11 @@
 личные касания складывать нельзя: двадцать постов и двадцать сообщений в
 личку это разная работа, и смысл отчёта в том, какая из них сработала.
 """
+import io
 import json
+import logging
+import re
+import urllib.error
 from datetime import date
 
 import pytest
@@ -448,40 +452,244 @@ def test_numbers_are_written_the_russian_way():
     assert report.percent(None) == "—"
 
 
-# ------------------------------- сборка письма ----------------------------
+# ------------------------------- сообщение --------------------------------
+#
+# Сообщение читают с телефона в понедельник утром, и форма у него жёсткая:
+# заголовок, цифры в <pre>-блоке с выровненными колонками, два коротких
+# раздела выводов. Потолок — 1500 знаков, и соблюдается он за счёт выводов,
+# а не цифр.
 
-def test_message_puts_code_numbers_above_model_text():
-    message = weekly_report.build_message("ЦИФРЫ", "ВЫВОДЫ", "05.10–11.10")
-    assert message.index("ЦИФРЫ") < message.index("ВЫВОДЫ")
-    assert "Отчёт по подбору за неделю 05.10–11.10" in message
+@pytest.fixture
+def filled():
+    """Неделя 13–19 октября: три размещения в трёх каналах, два дня личек."""
+    posts = read_placements(
+        placement_values(
+            ["2026-10-14", "Авито", "", ""],
+            ["2026-10-15", "Работа в продажах", "", ""],
+            ["2026-10-16", "HR чат МСК", "", ""],
+        )
+    )
+    touches = read_outreach(
+        outreach_values(["2026-10-13", 30, "", "", ""], ["2026-10-16", 32, "", "", ""])
+    )
+    rows = [
+        data_row(id="a1", created_at="2026-10-16 10:00:00", source="p002",
+                 verdict="A", total_score=13),
+        *[
+            data_row(id=f"b{i}", created_at="2026-10-16 11:00:00", source="p002",
+                     verdict="B", total_score=9)
+            for i in range(4)
+        ],
+        *[
+            data_row(id=f"c{i}", created_at="2026-10-17 10:00:00", source="lk_13_10",
+                     verdict="C", total_score=4)
+            for i in range(6)
+        ],
+        data_row(id="s1", created_at="2026-10-18 10:00:00", source="p002",
+                 verdict="C", total_score=0, stop_1_sdelno="Нет, нужен оклад"),
+    ]
+    responses = report.read_responses(data_values(*rows))
+
+    week = report.Period(date(2026, 10, 13), date(2026, 10, 19))
+    current = report.stats(week, responses, posts, touches)
+    previous = report.stats(week.shifted(-1), responses, posts, touches)
+    # Прошлая неделя подделана: нужна дельта в обе стороны.
+    previous.placements, previous.outreach_sent, previous.responses = 9, 58, 17
+    return current, previous
 
 
-def test_message_goes_out_even_without_the_model():
-    message = weekly_report.build_message("ЦИФРЫ", "", "05.10–11.10")
-    assert "ЦИФРЫ" in message
-    assert weekly_report.MODEL_FAILED_LINE in message
+def test_message_follows_the_agreed_shape(filled):
+    current, previous = filled
+    text = report.message(current, previous, "Вывод Нике.", "Вывод по вакансии.")
+
+    assert text.startswith("<b>Подбор · 13–19 октября</b>\n\n<pre>")
+    assert "<b>Нике</b>\nВывод Нике." in text
+    assert "<b>По вакансии</b>\nВывод по вакансии." in text
+    # Цифры выше выводов: их читают первыми.
+    assert text.index("</pre>") < text.index("<b>Нике</b>")
 
 
-def test_long_report_is_split_by_paragraphs():
-    text = "\n\n".join(f"абзац {i} " + "я" * 400 for i in range(20))
-    parts = weekly_report.chunks(text)
+def test_numbers_keep_their_columns(filled):
+    current, previous = filled
+    block = report.numbers_block(current, previous)
+    lines = block.split("\n")
 
-    assert len(parts) > 1
-    assert all(len(p) <= weekly_report.MESSAGE_LIMIT for p in parts)
-    # Ни один абзац не должен порваться пополам.
-    for i in range(20):
-        assert any(f"абзац {i} " in p for p in parts)
-
-
-def test_single_huge_paragraph_is_split_by_lines():
-    text = "\n".join("строка " + "я" * 100 for _ in range(100))
-    parts = weekly_report.chunks(text)
-    assert len(parts) > 1
-    assert all(len(p) <= weekly_report.MESSAGE_LIMIT for p in parts)
+    assert lines[0] == "Размещений    3 / 100 ↓6"
+    assert lines[1] == "Личных       62 / 100 ↑4"
+    assert lines[2] == "Откликов     12 ↓5  (каналы 6 · личеки 6)"
+    # «/» друг под другом — иначе колонки плывут на телефоне.
+    assert lines[0].index("/") == lines[1].index("/")
 
 
-def test_short_report_stays_one_message():
-    assert weekly_report.chunks("коротко") == ["коротко"]
+def test_delta_shows_up_only_where_there_is_one(filled):
+    current, previous = filled
+    previous.outreach_sent = current.outreach_sent      # без изменений
+    previous.responses = None                           # сравнивать нечего
+    block = report.numbers_block(current, previous)
+
+    assert "Личных       62 / 100\n" in block + "\n", "нулевая дельта — шум"
+    assert "↑" not in block.split("\n")[1] and "↓" not in block.split("\n")[1]
+    assert report.arrow(5, None) == ""
+    assert report.arrow(5, 5) == ""
+    assert report.arrow(14, 20) == " ↓6"
+    assert report.arrow(20, 14) == " ↑6"
+
+
+def test_levels_and_average_go_on_one_line(filled):
+    current, previous = filled
+    block = report.numbers_block(current, previous)
+    assert "A 1 · B 4 · C 7 · средний балл 6,6" in block
+    assert "Отсев на условиях: 1" in block
+
+
+def test_sources_in_brackets_add_up_to_the_total(filled):
+    """Скобки обязаны сходиться с общим числом откликов.
+
+    Иначе им незачем верить: читатель первым делом сложит их в голове.
+    """
+    current, previous = filled
+    assert current.responses == 12
+    line = report.numbers_block(current, previous).split("\n")[2]
+    assert sum(int(n) for n in re.findall(r"\d+", line.split("(")[1])) == 12
+
+    # Отклики без метки и с чужой меткой показываются, только когда есть.
+    assert "без метки" not in line
+    current.unlabelled = 2
+    current.unknown_labels = {"p099": 1}
+    current.responses += 3
+    line = report.numbers_block(current, previous).split("\n")[2]
+
+    assert "без метки 2" in line and "чужая метка 1" in line
+    assert sum(int(n) for n in re.findall(r"\d+", line.split("(")[1])) == 15
+
+
+def test_quiet_sections_are_printed_only_when_there_is_something_to_say(filled):
+    current, previous = filled
+    block = report.numbers_block(current, previous)
+    assert "Пусто: HR чат МСК, Работа в продажах" in block
+    assert "Тишина: 13, 14, 15, 19 окт" in block
+
+    # Все каналы отработали и откликов не было только в один день — строк нет.
+    current.channels = []
+    current.days = [report.DayRow(day=d, responses=1) for d in current.period.days]
+    quiet = report.numbers_block(current, previous)
+    assert "Пусто:" not in quiet and "Тишина:" not in quiet
+
+
+def test_long_channel_list_does_not_eat_the_message(filled):
+    current, previous = filled
+    current.channels = [
+        report.ChannelRow(channel=f"Канал {i}", placements=1, responses=0)
+        for i in range(12)
+    ]
+    block = report.numbers_block(current, previous)
+    assert "и ещё 7" in block
+    assert len(block.split("Пусто: ")[1].split("\n")[0]) < 120
+
+
+def test_empty_week_says_it_plainly():
+    week = report.Period(date(2026, 10, 13), date(2026, 10, 19))
+    current = report.stats(week, [], [], [])
+    previous = report.stats(week.shifted(-1), [], [], [])
+    text = report.message(current, previous)
+
+    assert report.NO_RESPONSES_LINE in text
+    assert "Тишина: 13, 14, 15, 16, 17, 18, 19 окт" in text
+
+
+def test_message_never_goes_over_the_limit(filled):
+    """Потолок жёсткий: обрезаются выводы модели, а не цифры."""
+    current, previous = filled
+    long_text = "слово " * 400
+    text = report.message(current, previous, long_text, long_text)
+
+    assert len(text) <= report.MESSAGE_LIMIT
+    numbers = report.numbers_block(current, previous)
+    assert report.esc(numbers) in text, "цифры должны остаться целиком"
+    assert report.ELLIPSIS in text, "обрезанный вывод помечается отбивкой"
+
+
+def test_runaway_first_section_does_not_starve_the_second(filled):
+    """У каждого раздела свой предел: промпт просит две фразы, но
+    рассчитывать на послушание модели нельзя."""
+    current, previous = filled
+    text = report.message(current, previous, "слово " * 400, "слово " * 400)
+
+    assert len(text) <= report.MESSAGE_LIMIT
+    assert "<b>Нике</b>" in text and "<b>По вакансии</b>" in text
+    for part in text.split("<b>")[2:]:
+        body = part.split("</b>\n")[1]
+        assert len(body) <= report.SECTION_LIMIT, body[:60]
+
+
+def test_section_is_dropped_when_there_is_no_room_at_all(filled):
+    current, previous = filled
+    tight = len(report.message(current, previous)) + 50
+    text = report.message(current, previous, "слово " * 50, "слово " * 50, limit=tight)
+
+    assert len(text) <= tight
+    assert "<b>По вакансии</b>" not in text, "на второй раздел места не осталось"
+
+
+def test_long_channel_names_are_shortened():
+    """Названия заводит человек, и они бывают длиной в полстроки."""
+    assert report.short_name("Авито") == "Авито"
+    long = report.short_name("Телеграм-канал «Работа в продажах Москва и область»")
+    assert len(long) <= report.CHANNEL_NAME_LIMIT
+    assert long.endswith(report.ELLIPSIS)
+
+
+def test_empty_conclusions_leave_no_empty_headers(filled):
+    current, previous = filled
+    text = report.message(current, previous, "", "   ")
+    assert "<b>Нике</b>" not in text and "<b>По вакансии</b>" not in text
+
+
+def test_outside_text_is_escaped_for_html(filled):
+    """Одна угловая скобка в названии канала вернула бы ошибку 400."""
+    current, previous = filled
+    current.channels = [
+        report.ChannelRow(channel="Работа <для> всех & ещё", placements=1, responses=0)
+    ]
+    text = report.message(current, previous, "жадность <b>не</b> пройдёт")
+
+    assert "&lt;для&gt;" in text and "&amp;" in text
+    assert "<b>не</b>" not in text
+    # Разметка остаётся только та, которую поставил код.
+    assert text.count("<b>") == text.count("</b>") == 2
+    assert text.count("<pre>") == text.count("</pre>") == 1
+
+
+def test_period_title_names_the_month():
+    assert report.period_title(report.Period(date(2026, 10, 13), date(2026, 10, 19))) == (
+        "13–19 октября"
+    )
+    assert report.period_title(report.Period(date(2026, 9, 28), date(2026, 10, 4))) == (
+        "28 сентября – 4 октября"
+    )
+
+
+def test_short_days_name_the_month_once():
+    assert report.short_days([date(2026, 10, 14), date(2026, 10, 15)]) == "14, 15 окт"
+    assert report.short_days([date(2026, 9, 30), date(2026, 10, 1)]) == "30 сен, 1 окт"
+    assert report.short_days([]) == ""
+
+
+def test_fit_cuts_by_word_and_gives_up_when_there_is_no_room():
+    assert report.fit("одно слово", 100) == "одно слово"
+    cut = report.fit("слово " * 50, 40)
+    assert len(cut) <= 40 and cut.endswith(report.ELLIPSIS)
+    assert " " in cut and not cut.endswith(" " + report.ELLIPSIS)
+    assert report.fit("слово " * 50, 20) == "", "в двадцать знаков вывод не влезет"
+
+
+def test_build_message_says_when_the_model_was_silent(filled):
+    current, previous = filled
+    text = weekly_report.build_message(current, previous)
+
+    assert weekly_report.MODEL_FAILED_LINE in text
+    assert len(text) <= report.MESSAGE_LIMIT
+    assert "<b>Нике</b>" not in text
 
 
 # -------------------------------- отправка --------------------------------
@@ -491,39 +699,55 @@ class FakeTelegram:
 
     def __init__(self, failing: set[str] = frozenset()):
         self.failing = failing
-        self.sent: list[tuple[str, str]] = []
+        self.sent: list[dict] = []
 
     def post(self, method: str, payload: dict) -> dict:
         assert method == "sendMessage"
-        chat = payload["chat_id"]
-        if chat in self.failing:
+        if payload["chat_id"] in self.failing:
             return {"ok": False, "description": "chat not found"}
-        self.sent.append((chat, payload["text"]))
+        self.sent.append(payload)
         return {"ok": True}
+
+    @property
+    def chats(self) -> list[str]:
+        return [p["chat_id"] for p in self.sent]
+
+
+def recipients(*raw: str) -> list:
+    return [
+        weekly_report.Recipient(*(r.split(":")[0], int(r.split(":")[1]))) 
+        if ":" in r else weekly_report.Recipient(r)
+        for r in raw
+    ]
 
 
 @pytest.fixture
 def telegram(monkeypatch):
     fake = FakeTelegram()
     monkeypatch.setattr(weekly_report, "post", fake.post)
-    monkeypatch.setattr(weekly_report, "telegram_chat_ids", lambda: ["111", "-100222"])
+    monkeypatch.setattr(
+        weekly_report, "telegram_recipients",
+        lambda: recipients("111", "-100222"),
+    )
     return fake
 
 
 def test_report_goes_to_every_recipient(telegram):
     sent, failed = weekly_report.broadcast("отчёт")
     assert (sent, failed) == (2, 0)
-    assert [chat for chat, _ in telegram.sent] == ["111", "-100222"]
+    assert telegram.chats == ["111", "-100222"]
 
 
 def test_one_bad_recipient_does_not_stop_the_others(monkeypatch):
     fake = FakeTelegram(failing={"111"})
     monkeypatch.setattr(weekly_report, "post", fake.post)
-    monkeypatch.setattr(weekly_report, "telegram_chat_ids", lambda: ["111", "222", "333"])
+    monkeypatch.setattr(
+        weekly_report, "telegram_recipients", lambda: recipients("111", "222", "333")
+    )
 
     sent, failed = weekly_report.broadcast("отчёт")
     assert (sent, failed) == (2, 1)
-    assert [chat for chat, _ in fake.sent] == ["222", "333"]
+    assert fake.chats == ["222", "333"]
 
 
 def test_network_failure_of_one_recipient_is_isolated(monkeypatch):
@@ -536,25 +760,220 @@ def test_network_failure_of_one_recipient_is_isolated(monkeypatch):
         return {"ok": True}
 
     monkeypatch.setattr(weekly_report, "post", post)
-    monkeypatch.setattr(weekly_report, "telegram_chat_ids", lambda: ["111", "222"])
+    monkeypatch.setattr(
+        weekly_report, "telegram_recipients", lambda: recipients("111", "222")
+    )
 
     assert weekly_report.broadcast("отчёт") == (1, 1)
     assert calls == ["111", "222"]
 
 
-def test_message_is_sent_as_plain_text(telegram):
-    """Разметка Телеграма споткнулась бы на звёздочках и подчёркиваниях в
-    метках вроде lk_05_10 и вернула ошибку вместо сообщения."""
-    weekly_report.broadcast("метка lk_05_10 и *звёздочка*")
-    assert telegram.sent, "сообщение должно уйти как есть"
-    assert telegram.sent[0][1] == "метка lk_05_10 и *звёздочка*"
+def test_message_is_sent_as_html(telegram):
+    """Колонки сводки держатся пробелами в <pre>, и без parse_mode Телеграм
+    показал бы теги как текст."""
+    weekly_report.broadcast("<b>Подбор</b>")
+    assert telegram.sent[0]["parse_mode"] == "HTML"
+    assert telegram.sent[0]["text"] == "<b>Подбор</b>"
+    assert telegram.sent[0]["disable_web_page_preview"] is True
 
 
-def test_recipients_are_parsed_from_one_variable(monkeypatch):
+# ------------------------- тема супергруппы -------------------------------
+
+def test_topic_goes_into_the_request_body(monkeypatch):
+    fake = FakeTelegram()
+    monkeypatch.setattr(weekly_report, "post", fake.post)
+    monkeypatch.setattr(
+        weekly_report, "telegram_recipients",
+        lambda: recipients("-1004367079334:12", "111"),
+    )
+
+    assert weekly_report.broadcast("отчёт") == (2, 0)
+    forum, personal = fake.sent
+    assert forum["chat_id"] == "-1004367079334"
+    assert forum["message_thread_id"] == 12, "отчёт должен падать в свою тему"
+    assert "message_thread_id" not in personal, "в личке тем нет"
+
+
+def test_thread_id_is_a_number_in_the_payload():
+    """Bot API ждёт message_thread_id числом: строка «12» даёт 400."""
+    body = weekly_report.payload_for(
+        weekly_report.Recipient("-100", 12), "текст"
+    )
+    assert body["message_thread_id"] == 12
+    assert isinstance(body["message_thread_id"], int)
+
+
+# --------------- отказ из-за темы: откат в общий поток --------------------
+#
+# Неверный или закрытый номер темы обнаруживается ровно в понедельник
+# утром, когда править его некому. Отчёт в общем потоке хуже отчёта в своей
+# ветке, но несравнимо лучше отчёта, которого нет.
+
+THREAD_ERRORS = [
+    "Bad Request: message thread not found",
+    "Bad Request: TOPIC_CLOSED",
+    "Bad Request: TOPIC_DELETED",
+    "Bad Request: message_thread_id is invalid",
+]
+
+
+class TopicRefusing:
+    """Bot API, который отказывает всему, что приходит с темой."""
+
+    def __init__(self, description: str, http: bool = False, fail_plain: bool = False):
+        self.description = description
+        self.http = http               # отказ приходит исключением, а не телом
+        self.fail_plain = fail_plain   # общий поток тоже не принимает
+        self.payloads: list[dict] = []
+
+    def post(self, method: str, payload: dict) -> dict:
+        self.payloads.append(payload)
+        if "message_thread_id" in payload:
+            return self.refuse()
+        if self.fail_plain:
+            return {"ok": False, "error_code": 400, "description": "Bad Request: chat not found"}
+        return {"ok": True}
+
+    def refuse(self):
+        if not self.http:
+            return {"ok": False, "error_code": 400, "description": self.description}
+        body = json.dumps(
+            {"ok": False, "error_code": 400, "description": self.description}
+        ).encode("utf-8")
+        raise urllib.error.HTTPError(
+            "https://api.telegram.org/botX/sendMessage", 400, self.description,
+            {}, io.BytesIO(body),
+        )
+
+
+@pytest.mark.parametrize("description", THREAD_ERRORS)
+def test_refused_topic_falls_back_to_the_common_thread(monkeypatch, caplog, description):
+    fake = TopicRefusing(description)
+    monkeypatch.setattr(weekly_report, "post", fake.post)
+
+    with caplog.at_level(logging.WARNING):
+        assert weekly_report.send_to(
+            weekly_report.Recipient("-1004367079334", 12), "отчёт"
+        ) is True
+
+    assert len(fake.payloads) == 2, "одна попытка с темой, одна без"
+    assert fake.payloads[0]["message_thread_id"] == 12
+    assert "message_thread_id" not in fake.payloads[1]
+    assert fake.payloads[1]["chat_id"] == "-1004367079334"
+    assert fake.payloads[1]["text"] == "отчёт", "текст тот же, без изменений"
+
+    warnings = " ".join(r.getMessage() for r in caplog.records)
+    assert "повторяю без неё" in warnings
+    assert "общий поток" in warnings
+    assert "TELEGRAM_CHAT_IDS" in warnings, "в логе должно быть сказано, что править"
+
+
+def test_topic_refusal_as_http_error_also_falls_back(monkeypatch):
+    """Телеграм отвечает на 400 исключением HTTPError, а не телом ответа."""
+    fake = TopicRefusing("Bad Request: message thread not found", http=True)
+    monkeypatch.setattr(weekly_report, "post", fake.post)
+
+    assert weekly_report.send_to(
+        weekly_report.Recipient("-100", 7), "отчёт"
+    ) is True
+    assert len(fake.payloads) == 2
+
+
+def test_other_refusals_are_not_retried(monkeypatch):
+    """«Чата нет» темой не лечится — повтор только сжёг бы лимит."""
+    fake = TopicRefusing("Bad Request: chat not found")
+
+    def post(method, payload):
+        fake.payloads.append(payload)
+        return {"ok": False, "error_code": 400, "description": "Bad Request: chat not found"}
+
+    monkeypatch.setattr(weekly_report, "post", post)
+
+    assert weekly_report.send_to(weekly_report.Recipient("-100", 7), "отчёт") is False
+    assert len(fake.payloads) == 1
+
+
+def test_fallback_failure_is_still_a_failure(monkeypatch):
+    fake = TopicRefusing("Bad Request: TOPIC_CLOSED", fail_plain=True)
+    monkeypatch.setattr(weekly_report, "post", fake.post)
+
+    assert weekly_report.send_to(weekly_report.Recipient("-100", 7), "отчёт") is False
+    assert len(fake.payloads) == 2, "попробовать общий поток всё равно нужно"
+
+
+def test_recipient_without_a_topic_has_nothing_to_fall_back_to(monkeypatch):
+    calls = []
+
+    def post(method, payload):
+        calls.append(payload)
+        return {"ok": False, "error_code": 400, "description": "Bad Request: topic closed"}
+
+    monkeypatch.setattr(weekly_report, "post", post)
+
+    assert weekly_report.send_to(weekly_report.Recipient("111"), "отчёт") is False
+    assert len(calls) == 1, "снимать нечего — повторять незачем"
+
+
+def test_fallback_does_not_stop_the_rest_of_the_broadcast(monkeypatch):
+    """Группа с неверной темой не должна мешать остальным получателям."""
+    fake = TopicRefusing("Bad Request: message thread not found")
+    monkeypatch.setattr(weekly_report, "post", fake.post)
+    monkeypatch.setattr(
+        weekly_report, "telegram_recipients",
+        lambda: recipients("-100222:5", "111"),
+    )
+
+    assert weekly_report.broadcast("отчёт") == (2, 0)
+    assert [p["chat_id"] for p in fake.payloads] == ["-100222", "-100222", "111"]
+
+
+@pytest.mark.parametrize(
+    "error,code,topic",
+    [
+        ("Bad Request: message thread not found", 400, True),
+        ("Bad Request: TOPIC_CLOSED", 400, True),
+        ("Bad Request: chat not found", 400, False),
+        ("Bad Request: message thread not found", 403, False),
+        ("Bad Request: message is too long", 400, False),
+        ("", 400, False),
+    ],
+)
+def test_topic_error_is_recognised_by_code_and_wording(error, code, topic):
+    assert weekly_report.is_topic_error(error, code) is topic
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("111", [("111", None)]),
+        ("-100456", [("-100456", None)]),
+        ("-1004367079334:12", [("-1004367079334", 12)]),
+        (" 111 , -1004367079334:12 ", [("111", None), ("-1004367079334", 12)]),
+        ("111,,", [("111", None)]),
+        ("", []),
+        ("   ", []),
+        # Опечатка в номере темы не отменяет получателя: отчёт уйдёт в общий
+        # поток группы, а не пропадёт.
+        ("-100777:abc", [("-100777", None)]),
+        ("-100777:", [("-100777", None)]),
+        # Кусок без чата — не получатель.
+        (":12", []),
+        ("-100888:12:34", [("-100888", None)]),
+    ],
+)
+def test_recipients_are_parsed_from_one_variable(monkeypatch, raw, expected):
     from app import config
 
-    monkeypatch.setattr(config, "TELEGRAM_CHAT_IDS_RAW", " 111, -100222 ,, ")
-    assert config.telegram_chat_ids() == ["111", "-100222"]
+    monkeypatch.setattr(config, "TELEGRAM_CHAT_IDS_RAW", raw)
+    assert [tuple(r) for r in config.telegram_recipients()] == expected
+
+
+def test_recipient_keeps_its_fields_named():
+    from app import config
+
+    r = config.Recipient("-100", 12)
+    assert (r.chat_id, r.thread_id) == ("-100", 12)
+    assert config.Recipient("111").thread_id is None
 
 
 # -------------------------------- точка входа -----------------------------
@@ -583,13 +1002,17 @@ def test_dry_run_prints_and_sends_nothing(collected, monkeypatch, capsys):
 
     assert weekly_report.main(["--dry-run", "--no-model"]) == 0
     printed = capsys.readouterr().out
+    assert "<b>Подбор · 5–11 октября</b>" in printed, "печатается то, что уйдёт"
     assert report.NO_RESPONSES_LINE in printed
-    assert "Отчёт по подбору за неделю" in printed
+    # Сухой прогон показывает и то, что видела модель: иначе непонятно, из
+    # каких чисел собран отчёт.
+    assert "что получила модель" in printed
+    assert "ПО ДНЯМ" in printed
 
 
 def test_run_without_recipients_stops_before_counting(monkeypatch):
     monkeypatch.setattr(weekly_report, "missing_secrets", lambda: [])
-    monkeypatch.setattr(weekly_report, "telegram_chat_ids", lambda: [])
+    monkeypatch.setattr(weekly_report, "telegram_recipients", lambda: [])
     monkeypatch.setattr(weekly_report, "TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.setattr(
         weekly_report, "collect",
@@ -607,21 +1030,29 @@ def test_report_is_sent_with_the_model_text(collected, monkeypatch):
     fake = FakeTelegram()
     monkeypatch.setattr(weekly_report, "post", fake.post)
     monkeypatch.setattr(weekly_report, "missing_secrets", lambda: [])
-    monkeypatch.setattr(weekly_report, "telegram_chat_ids", lambda: ["111"])
+    monkeypatch.setattr(
+        weekly_report, "telegram_recipients", lambda: recipients("111")
+    )
     monkeypatch.setattr(weekly_report, "TELEGRAM_BOT_TOKEN", "token")
-    monkeypatch.setattr(weekly_report, "conclusions", lambda numbers: "ВЫВОДЫ")
+    monkeypatch.setattr(
+        weekly_report, "conclusions", lambda numbers: ("ВЫВОД НИКЕ", "ВЫВОД ПО ВАКАНСИИ")
+    )
 
     assert weekly_report.main([]) == 0
-    chat, text = fake.sent[0]
-    assert chat == "111"
-    assert "ВЫВОДЫ" in text and report.NO_RESPONSES_LINE in text
+    assert fake.chats == ["111"]
+    text = fake.sent[0]["text"]
+    assert "<b>Нике</b>\nВЫВОД НИКЕ" in text
+    assert "<b>По вакансии</b>\nВЫВОД ПО ВАКАНСИИ" in text
+    assert report.NO_RESPONSES_LINE in text
 
 
 def test_failed_model_does_not_cancel_the_report(collected, monkeypatch):
     fake = FakeTelegram()
     monkeypatch.setattr(weekly_report, "post", fake.post)
     monkeypatch.setattr(weekly_report, "missing_secrets", lambda: [])
-    monkeypatch.setattr(weekly_report, "telegram_chat_ids", lambda: ["111"])
+    monkeypatch.setattr(
+        weekly_report, "telegram_recipients", lambda: recipients("111")
+    )
     monkeypatch.setattr(weekly_report, "TELEGRAM_BOT_TOKEN", "token")
     monkeypatch.setattr(
         weekly_report, "client",
@@ -629,18 +1060,85 @@ def test_failed_model_does_not_cancel_the_report(collected, monkeypatch):
     )
 
     assert weekly_report.main([]) == 0
-    assert report.NO_RESPONSES_LINE in fake.sent[0][1]
+    text = fake.sent[0]["text"]
+    assert report.NO_RESPONSES_LINE in text, "цифры уходят и без модели"
+    assert weekly_report.MODEL_FAILED_LINE in text
 
 
 def test_everyone_failing_is_an_error(collected, monkeypatch):
     fake = FakeTelegram(failing={"111"})
     monkeypatch.setattr(weekly_report, "post", fake.post)
     monkeypatch.setattr(weekly_report, "missing_secrets", lambda: [])
-    monkeypatch.setattr(weekly_report, "telegram_chat_ids", lambda: ["111"])
+    monkeypatch.setattr(
+        weekly_report, "telegram_recipients", lambda: recipients("111")
+    )
     monkeypatch.setattr(weekly_report, "TELEGRAM_BOT_TOKEN", "token")
-    monkeypatch.setattr(weekly_report, "conclusions", lambda numbers: "")
+    monkeypatch.setattr(weekly_report, "conclusions", lambda numbers: ("", ""))
 
     assert weekly_report.main([]) == 1
+
+
+# ----------------------------- выводы модели ------------------------------
+
+class FakeAnthropic:
+    """Клиент, отдающий заранее заданный текст. Сети не требует."""
+
+    def __init__(self, text: str):
+        self.text = text
+        self.calls: list[dict] = []
+        self.messages = self
+
+    def create(self, **kw):
+        self.calls.append(kw)
+        block = type("Block", (), {"type": "text", "text": self.text})()
+        return type("Response", (), {"content": [block]})()
+
+
+def ask(monkeypatch, text: str) -> tuple:
+    fake = FakeAnthropic(text)
+    monkeypatch.setattr(weekly_report, "client", lambda: fake)
+    monkeypatch.setattr(weekly_report, "ANTHROPIC_API_KEY", "ключ")
+    return weekly_report.conclusions("ЦИФРЫ"), fake
+
+
+def test_conclusions_come_as_two_sections(monkeypatch):
+    (nika, vacancy), fake = ask(
+        monkeypatch, '{"nika": "Замени два пустых канала.", "vacancy": "Все C."}'
+    )
+    assert nika == "Замени два пустых канала."
+    assert vacancy == "Все C."
+
+    call = fake.calls[0]
+    assert call["model"] == "claude-sonnet-4-6"
+    assert call["messages"] == [{"role": "user", "content": "ЦИФРЫ"}]
+    assert "ни одного числа от себя" in call["system"].lower()
+
+
+def test_conclusions_survive_a_markdown_wrapper(monkeypatch):
+    """Модель иногда оборачивает JSON в ```json — это не повод терять отчёт."""
+    (nika, vacancy), _ = ask(
+        monkeypatch, '```json\n{"nika": "А", "vacancy": "Б"}\n```'
+    )
+    assert (nika, vacancy) == ("А", "Б")
+
+
+def test_missing_section_is_just_empty(monkeypatch):
+    (nika, vacancy), _ = ask(monkeypatch, '{"nika": "А"}')
+    assert (nika, vacancy) == ("А", "")
+
+
+def test_unparsable_answer_does_not_cancel_the_report(monkeypatch):
+    (nika, vacancy), _ = ask(monkeypatch, "я не умею в JSON")
+    assert (nika, vacancy) == ("", "")
+
+
+def test_model_is_not_called_without_a_key(monkeypatch):
+    fake = FakeAnthropic('{"nika": "А"}')
+    monkeypatch.setattr(weekly_report, "client", lambda: fake)
+    monkeypatch.setattr(weekly_report, "ANTHROPIC_API_KEY", "")
+
+    assert weekly_report.conclusions("ЦИФРЫ") == ("", "")
+    assert fake.calls == [], "без ключа обращаться незачем"
 
 
 # --------------------------------- промпт ---------------------------------
@@ -650,9 +1148,16 @@ def test_prompt_forbids_the_model_to_do_arithmetic():
     assert "ни одного числа от себя" in PROMPT.lower()
 
 
-def test_prompt_asks_for_the_agreed_sections():
-    for section in ("Каналы", "Провалы по дням", "Вопросы Нике", "Не к Нике"):
-        assert section in PROMPT, section
+def test_prompt_asks_for_exactly_two_sections():
+    assert "**nika**" in PROMPT and "**vacancy**" in PROMPT
+    assert '{"nika": "…", "vacancy": "…"}' in PROMPT
+    assert "по две короткие фразы" in PROMPT
+
+
+def test_prompt_forbids_markup_and_restating_numbers():
+    assert "Заголовки разделов ставит код" in PROMPT
+    assert "Не пересказывай цифры" in PROMPT
+    assert "200 знаков" in PROMPT, "у разделов должен быть предел длины"
 
 
 def test_prompt_knows_the_daily_plan():
