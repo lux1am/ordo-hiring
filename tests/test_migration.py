@@ -12,6 +12,7 @@ import pytest
 
 import apply_headers
 import archive_old
+import sync_questions
 from HEADERS import HEADERS, col_letter
 
 # Прежняя раскладка: те же 54 колонки, другие имена стоп-вопросов.
@@ -71,8 +72,12 @@ class FakeWorksheet:
         self.col_count = cols
         self.spreadsheet = spreadsheet
         self.cells: dict[tuple[int, int], str] = {}
+        self.notes: dict[str, str] = {}
         self.hidden = False
         self.appends = 0
+        self.id = spreadsheet.next_id() if spreadsheet else 0
+        self.widths: dict[int, int] = {}
+        self.validations: list[tuple] = []
 
     # --- служебное -------------------------------------------------------
     def put(self, row: int, col: int, value) -> None:
@@ -123,10 +128,47 @@ class FakeWorksheet:
     def hide(self):
         self.hidden = True
 
+    def show(self):
+        self.hidden = False
+
+    @property
+    def isSheetHidden(self) -> bool:
+        return self.hidden
+
+    def update_notes(self, notes):
+        """Пустой текст стирает примечание — так же ведёт себя Sheets."""
+        for cell, text in notes.items():
+            if text:
+                self.notes[cell] = text
+            else:
+                self.notes.pop(cell, None)
+
+    def resize(self, rows, cols):
+        """Ужимая лист, Sheets теряет всё, что осталось за границей."""
+        self.row_count, self.col_count = rows, cols
+        self.cells = {
+            (r, c): v for (r, c), v in self.cells.items() if r <= rows and c <= cols
+        }
+
+    def batch_format(self, formats):
+        self.formats = list(formats)
+
+    def add_validation(self, range, condition_type, values, **kw):
+        self.validations.append((range, condition_type, tuple(values), kw))
+
 
 class FakeBook:
     def __init__(self):
         self.sheets: dict[str, FakeWorksheet] = {}
+        self._ids = 0
+
+    def next_id(self) -> int:
+        """Идентификаторы не переиспользуются: удалённый лист не отдаёт свой."""
+        self._ids += 1
+        return self._ids
+
+    def by_id(self, sheet_id: int) -> FakeWorksheet:
+        return next(ws for ws in self.sheets.values() if ws.id == sheet_id)
 
     def add(self, title, **kw) -> FakeWorksheet:
         ws = FakeWorksheet(title, spreadsheet=self, **kw)
@@ -142,6 +184,26 @@ class FakeBook:
     def add_worksheet(self, title, rows, cols):
         return self.add(title, rows=rows, cols=cols)
 
+    def worksheets(self):
+        return list(self.sheets.values())
+
+    def del_worksheet(self, ws):
+        self.sheets.pop(ws.title)
+
+    def batch_update(self, body):
+        """Применяет то, чем пользуется код: видимость и ширину колонок."""
+        self.requests = body["requests"]
+        for request in self.requests:
+            props = request.get("updateSheetProperties", {}).get("properties")
+            if props:
+                self.by_id(props["sheetId"]).hidden = props["hidden"]
+            dimension = request.get("updateDimensionProperties")
+            if dimension:
+                ws = self.by_id(dimension["range"]["sheetId"])
+                ws.widths[dimension["range"]["startIndex"]] = (
+                    dimension["properties"]["pixelSize"]
+                )
+
 
 @pytest.fixture
 def book(monkeypatch):
@@ -155,7 +217,7 @@ def book(monkeypatch):
     for r in range(2, 12):
         data.put(r, HEADERS.index("total_score") + 1, FORMULA)
 
-    for module in (archive_old, apply_headers):
+    for module in (archive_old, apply_headers, sync_questions):
         monkeypatch.setattr(module.sheets, "worksheet", lambda: data)
         monkeypatch.setattr(module, "missing_secrets", lambda: [])
     return fake
@@ -345,3 +407,129 @@ def test_occupied_rows_ignores_blank_lines():
     values = [HEADERS, old_row(1), [""] * len(HEADERS), old_row(2)]
     assert apply_headers.occupied_rows(values) == 2
     assert apply_headers.occupied_rows([HEADERS]) == 0
+
+
+# ------------------------------ карточка ----------------------------------
+#
+# Скрипт шапки тянет за собой sync_questions: формулировки вопросов в
+# карточке меняются вместе с составом колонок, и отставать они не должны.
+
+
+def card_sheet(book) -> FakeWorksheet:
+    return book.sheets[sync_questions.CARD_TITLE]
+
+
+def add_hand_made_sheets(book) -> None:
+    """Листы, собранные в книге руками: скрипт их не создаёт, только показывает."""
+    for title in ("Кандидаты", "Как читать"):
+        book.add(title, rows=10, cols=13).hidden = True
+
+
+def test_headers_bring_the_card_along(book):
+    archive_old.main([])
+    assert apply_headers.main([]) == 0
+
+    values = card_sheet(book).get_all_values()
+    assert values[0][0] == "", "в A1 ложится выбранная фамилия"
+    assert any(row[0] == sync_questions.STOPS_TITLE for row in values)
+    assert any(
+        "За день вы получили 20 отказов подряд" in row[0] for row in values
+    ), "формулировки вопросов записаны текстом"
+
+
+def test_card_replaces_the_old_sheet_and_its_notes(book):
+    """Прежняя затея — лист «Вопросы» и примечания к шапке — убирается."""
+    data = data_sheet(book)
+    book.add(sync_questions.OLD_SHEET_TITLE, rows=40, cols=3)
+    data.notes["M1"] = "Вопрос 1: за день вы получили 20 отказов"
+    data.notes["G1"] = "Стоп-вопрос 1"
+
+    archive_old.main([])
+    assert sync_questions.main([]) == 0
+
+    assert sync_questions.OLD_SHEET_TITLE not in book.sheets
+    assert data.notes == {}, "примечания сняты со всей шапки"
+
+
+def test_card_is_idempotent(book):
+    archive_old.main([])
+    assert sync_questions.main([]) == 0
+    first = card_sheet(book).get_all_values()
+
+    assert sync_questions.main([]) == 0
+    assert card_sheet(book).get_all_values() == first
+    assert sorted(book.sheets) == sorted(
+        ["Данные", archive_old.ARCHIVE_TITLE, sync_questions.CARD_TITLE]
+    ), "повторный запуск завёл лишний лист"
+
+
+def test_card_keeps_the_chosen_candidate(book):
+    """Пересборка не должна сбрасывать карточку, открытую на кандидате."""
+    archive_old.main([])
+    sync_questions.main([])
+    card_sheet(book).put(1, 1, "Кандидат 1")
+
+    assert sync_questions.main([]) == 0
+    assert card_sheet(book).get_all_values()[0][0] == "Кандидат 1"
+
+
+def test_card_shrinks_instead_of_keeping_old_rows(book):
+    archive_old.main([])
+    sync_questions.main([])
+    rows = len(card_sheet(book).get_all_values())
+
+    card_sheet(book).update(values=[["мусор"]], range_name=f"A{rows + 5}")
+    assert sync_questions.main([]) == 0
+    assert len(card_sheet(book).get_all_values()) == rows
+
+
+def test_card_gets_the_name_dropdown_and_widths(book):
+    archive_old.main([])
+    sync_questions.main([])
+    card = card_sheet(book)
+
+    cell, condition, values, kw = card.validations[-1]
+    assert cell == "A1"
+    assert values == (sync_questions.name_source(),)
+    assert kw["showCustomUi"] is True, "без этого выпадающего списка не будет"
+    assert card.widths == dict(enumerate(sync_questions.column_widths()))
+
+
+def test_visibility_is_restored(book):
+    add_hand_made_sheets(book)
+    archive_old.main([])
+    assert sync_questions.main([]) == 0
+
+    assert data_sheet(book).hidden is True
+    assert archive_sheet(book).hidden is True
+    for title in sync_questions.VISIBLE_SHEETS:
+        assert book.sheets[title].hidden is False, title
+
+
+def test_missing_hand_made_sheets_do_not_break_the_run(book):
+    """«Кандидаты» и «Как читать» собраны руками — в чужой копии их может не быть."""
+    archive_old.main([])
+    assert sync_questions.main([]) == 0
+    assert card_sheet(book).hidden is False
+    assert data_sheet(book).hidden is True
+
+
+def test_card_failure_does_not_undo_the_header(book):
+    """Шапка к этому моменту записана и перечитана — прогон не проваливается."""
+    archive_old.main([])
+    data = data_sheet(book)
+    data.update_notes = lambda notes: (_ for _ in ()).throw(RuntimeError("нет прав"))
+
+    assert apply_headers.main([]) == 0
+    assert data.row_values(1) == HEADERS
+    assert sync_questions.CARD_TITLE not in book.sheets
+
+
+def test_card_dry_run_touches_nothing(book):
+    archive_old.main([])
+    assert apply_headers.main(["--dry-run"]) == 0
+    assert sync_questions.CARD_TITLE not in book.sheets
+
+    assert sync_questions.main(["--dry-run"]) == 0
+    assert sync_questions.CARD_TITLE not in book.sheets
+    assert data_sheet(book).notes == {}

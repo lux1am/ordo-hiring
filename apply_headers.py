@@ -23,13 +23,21 @@
     python3 apply_headers.py --dry-run  # только показать расхождения
     python3 apply_headers.py --force    # записать поверх, не глядя на строки
 
+После шапки скрипт сам пересобирает лист «Карточка», см. sync_questions.py:
+имена колонок и формулировки вопросов меняются одним и тем же движением, и
+оставлять карточку на отдельный запуск значит рано или поздно про неё
+забыть. Там же приводится в порядок видимость листов книги.
+
 Код возврата: 0 — шапка на месте, 1 — не записана (есть строки или сбой
-таблицы), 2 — не настроено окружение.
+таблицы), 2 — не настроено окружение. Сбой карточки кода не меняет: шапка к
+этому моменту записана и проверена, а карточка пересобирается отдельным
+запуском sync_questions.py.
 """
 import argparse
 import logging
 import sys
 
+import sync_questions
 from HEADERS import FIRST_DATA_ROW, HEADERS, a1_range, col_letter
 from app import sheets
 from app.config import WORKSHEET_NAME, missing_secrets, setup_logging
@@ -68,6 +76,25 @@ def describe(diff: list[tuple[int, str, str]]) -> list[str]:
     ]
 
 
+def rebuild_card(dry_run: bool) -> None:
+    """Лист «Карточка» и видимость листов, см. sync_questions.py.
+
+    Своего кода возврата не имеет намеренно. Шапка к этому моменту записана
+    и перечитана — объявить прогон неудачным из-за карточки значило бы
+    позвать запустить всё заново там, где хватит одного sync_questions.py.
+    """
+    if dry_run:
+        log.info("сухой прогон: карточка не пересобирается")
+        return
+    try:
+        sync_questions.sync()
+    except Exception:
+        log.exception(
+            "шапка записана, но карточка не пересобрана — "
+            "запустите отдельно: python3 sync_questions.py"
+        )
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Записать шапку листа «Данные» из HEADERS.py"
@@ -96,7 +123,10 @@ def main(argv: list[str]) -> int:
 
     diff = header_diff(values[0] if values else [])
     if not diff:
+        # Формулировки вопросов могли поменяться и без правки имён колонок,
+        # да и видимость листов слетает сама: карточку собираем в любом случае.
         log.info("шапка уже совпадает с HEADERS.py (%d колонок)", len(HEADERS))
+        rebuild_card(args.dry_run)
         return 0
 
     log.info("расхождений с HEADERS.py: %d", len(diff))
@@ -135,6 +165,7 @@ def main(argv: list[str]) -> int:
         return 1
 
     log.info("шапка листа «%s» записана: %d колонок", WORKSHEET_NAME, len(HEADERS))
+    rebuild_card(args.dry_run)
     print(f"\nГотово. Диапазон {HEADER_RANGE} совпадает с HEADERS.py.\n", flush=True)
     return 0
 

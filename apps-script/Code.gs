@@ -37,6 +37,15 @@ var SPEED_CPM_THRESHOLD_MOBILE = 700;
 var SUSPICIOUS_MIN_LENGTH = 400;
 var TAB_AWAY_SECONDS_THRESHOLD = 60;
 
+// Обработчик анкет живёт в GitHub Actions, и после записи строки его просят
+// проснуться сразу, не дожидаясь расписания. Токен в коде не хранится: он
+// лежит в свойствах скрипта — см. apps-script/README.md, раздел «Токен
+// GitHub в свойствах скрипта».
+var GITHUB_REPO = 'lux1am/ordo-hiring';
+var GITHUB_WORKFLOW = 'worker.yml';
+var GITHUB_REF = 'main';
+var GITHUB_TOKEN_PROPERTY = 'GITHUB_TOKEN';
+
 var STATUS_NEW = 'new';
 var STATUS_DUPLICATE = 'duplicate';
 var TZ_OFFSET_HOURS = 3;
@@ -118,7 +127,65 @@ function submitForm(payload) {
       'Не удалось сохранить анкету. Попробуйте отправить ещё раз через минуту.';
     return { ok: false, errors: errors };
   }
+
+  // Строка записана — дальше кандидату уже ничем не навредишь. Просим
+  // GitHub запустить обработчик сейчас, а не через 10 минут; не вышло —
+  // остаётся в журнале, и анкету подберёт прогон по расписанию.
+  try {
+    triggerWorker();
+  } catch (err) {
+    Logger.log('не удалось запустить worker: ' + err);
+  }
   return { ok: true };
+}
+
+/**
+ * Просит GitHub Actions запустить worker.yml прямо сейчас:
+ * POST /repos/<repo>/actions/workflows/worker.yml/dispatches с ref = main.
+ *
+ * Токен берётся из свойств скрипта по ключу GITHUB_TOKEN. Нет токена, нет
+ * сети, ответил не тот код — пишем в журнал и возвращаем false: запуск по
+ * событию ускоряет обработку, но не отвечает за неё. Ответственность на
+ * расписании в worker.yml, оно остаётся запасным путём.
+ *
+ * Возвращает true, если GitHub принял запрос (204 без тела).
+ */
+function triggerWorker() {
+  var token = PropertiesService.getScriptProperties()
+    .getProperty(GITHUB_TOKEN_PROPERTY);
+  if (!token) {
+    Logger.log(
+      'worker не запущен: в свойствах скрипта нет ' + GITHUB_TOKEN_PROPERTY
+    );
+    return false;
+  }
+
+  var url = 'https://api.github.com/repos/' + GITHUB_REPO +
+    '/actions/workflows/' + GITHUB_WORKFLOW + '/dispatches';
+
+  // muteHttpExceptions: код ответа разбираем сами. Исключение на 401 или 404
+  // здесь ничего не даст — обрабатывать его всё равно нечем.
+  var response = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28'
+    },
+    payload: JSON.stringify({ ref: GITHUB_REF }),
+    muteHttpExceptions: true
+  });
+
+  var code = response.getResponseCode();
+  if (code === 204) {
+    Logger.log('worker запущен');
+    return true;
+  }
+  Logger.log(
+    'worker не запущен: HTTP ' + code + ' ' + response.getContentText()
+  );
+  return false;
 }
 
 /**
@@ -794,5 +861,10 @@ function checkSetup() {
   }
   Logger.log('следующая свободная строка: ' + allocateRow(sheet));
   Logger.log('адрес формы: ' + (webAppUrl() || 'НЕИЗВЕСТЕН — впишите WEB_APP_URL'));
+  Logger.log(
+    PropertiesService.getScriptProperties().getProperty(GITHUB_TOKEN_PROPERTY)
+      ? 'токен GitHub: найден в свойствах скрипта'
+      : 'токен GitHub: не задан — обработчик будет ждать расписания'
+  );
   return problems.length === 0;
 }
