@@ -31,7 +31,13 @@ from app import checks, ru, source
 # её вписывают в app/config.py позже, и строка «план / факт / отклонение»
 # должна появиться от одной этой правки.
 from app import config
-from app.config import plan_outreach, plan_placements, working_days
+from app.config import (
+    OUTREACH_SHEET,
+    PLACEMENTS_SHEET,
+    plan_outreach,
+    plan_placements,
+    working_days,
+)
 
 log = logging.getLogger(__name__)
 
@@ -291,6 +297,12 @@ class WeekStats:
 
     period: Period
 
+    # Заведён ли учёт вообще. Пустой лист за всю историю — это «учёта ещё
+    # нет», а не «работа не велась», и путать это нельзя: во втором случае
+    # ноль — упрёк человеку, в первом — напоминание завести таблицу.
+    placements_tracked: bool = False
+    outreach_tracked: bool = False
+
     placements: int = 0
     channel_responses: int = 0
     outreach_sent: int = 0
@@ -299,6 +311,7 @@ class WeekStats:
     responses: int = 0
     verdicts: dict[str, int] = field(default_factory=dict)
     average: float | None = None
+    scored: int = 0          # по сколькам анкетам посчитан средний балл
     rejected: int = 0
     reasons: dict[str, int] = field(default_factory=dict)
     unlabelled: int = 0
@@ -306,6 +319,21 @@ class WeekStats:
 
     channels: list[ChannelRow] = field(default_factory=list)
     days: list[DayRow] = field(default_factory=list)
+
+    @property
+    def tracking_started(self) -> bool:
+        """Учёт заведён целиком. Нет — выводов о работе по цифрам не делают."""
+        return self.placements_tracked and self.outreach_tracked
+
+    @property
+    def untracked(self) -> list[str]:
+        """Названия листов, которые пусты за всю историю."""
+        out = []
+        if not self.placements_tracked:
+            out.append(PLACEMENTS_SHEET)
+        if not self.outreach_tracked:
+            out.append(OUTREACH_SHEET)
+        return out
 
     @property
     def silent_days(self) -> list[date]:
@@ -373,7 +401,13 @@ def stats(
     """Цифры одной недели. Отклики считаются по своей дате, а не по дате
     размещения: пост живёт дольше дня, и отклик с прошлой недели — отклик
     этой."""
-    out = WeekStats(period=period)
+    out = WeekStats(
+        period=period,
+        # Смотрим на листы целиком, а не на неделю: лист, в котором нет ни
+        # одной строки за всю историю, означает, что учёт не начат.
+        placements_tracked=bool(placements),
+        outreach_tracked=bool(outreach),
+    )
 
     # Метка -> канал. Берутся все размещения, а не только недельные: отклик
     # на пост прошлой недели всё равно пришёл из этого канала.
@@ -411,6 +445,7 @@ def stats(
         else:
             out.unknown_labels[r.label] = out.unknown_labels.get(r.label, 0) + 1
 
+    out.scored = len(scores)
     if scores:
         out.average = sum(scores) / len(scores)
 
@@ -502,9 +537,12 @@ def percent(value: float | None) -> str:
 
 
 def numbers_text(cur: WeekStats, prev: WeekStats) -> str:
-    """Блок цифр: он уходит модели и он же уходит в Телеграм при её сбое.
+    """Блок цифр для модели: всё, что посчитано, и признак учёта.
 
-    Поэтому читаться должен сам по себе, без пояснений модели.
+    Признак стоит первым и назван по-машинному — tracking_started. По нему
+    модель отличает «работа не велась» от «учёт ещё не начат»: во втором
+    случае нулями ничего не доказывается, и выводов о работе человека по
+    ним делать нельзя.
     """
     out: list[str] = []
 
@@ -519,18 +557,32 @@ def numbers_text(cur: WeekStats, prev: WeekStats) -> str:
 
     add(f"Неделя {cur.period.title()} (предыдущая: {prev.period.title()})")
     add(f"Рабочих дней в неделе: {cur.period.working_days}")
+    add(f"tracking_started: {'true' if cur.tracking_started else 'false'}")
+    if not cur.tracking_started:
+        add(
+            "Листы учёта пусты за всю историю, а не только за эту неделю: "
+            + ", ".join(f"«{title}»" for title in cur.untracked)
+            + ". Учёт по ним ещё не начат, и нули ниже — отсутствие учёта, "
+            "а не отсутствие работы."
+        )
 
     blank()
     add("РАЗМЕЩЕНИЯ В КАНАЛАХ")
-    add(line("Размещений", cur.placements, prev.placements))
-    add(plan_line("План размещений", cur.plan_placements, cur.placements))
+    if cur.placements_tracked:
+        add(line("Размещений", cur.placements, prev.placements))
+        add(plan_line("План размещений", cur.plan_placements, cur.placements))
+    else:
+        add(f"Размещений: {NOT_TRACKED} (лист «{PLACEMENTS_SHEET}» пуст)")
     add(line("Откликов из каналов", cur.channel_responses, prev.channel_responses))
     add(line("Откликов на размещение", cur.per_placement, prev.per_placement, digits=2))
 
     blank()
     add("ЛИЧНЫЕ КАСАНИЯ")
-    add(line("Отправлено", cur.outreach_sent, prev.outreach_sent))
-    add(plan_line("План касаний", cur.plan_outreach, cur.outreach_sent))
+    if cur.outreach_tracked:
+        add(line("Отправлено", cur.outreach_sent, prev.outreach_sent))
+        add(plan_line("План касаний", cur.plan_outreach, cur.outreach_sent))
+    else:
+        add(f"Отправлено: {NOT_TRACKED} (лист «{OUTREACH_SHEET}» пуст)")
     add(line("Откликов из личек", cur.outreach_responses, prev.outreach_responses))
     add(
         f"Конверсия личных касаний: {percent(cur.outreach_rate)}"
@@ -553,7 +605,13 @@ def numbers_text(cur: WeekStats, prev: WeekStats) -> str:
                 prev.verdicts.get(level, 0),
             )
         )
-    add(line("Средний балл оценённых", cur.average, prev.average, digits=1))
+    if cur.scored:
+        # База у среднего балла своя — только оценённые анкеты. Пишется она
+        # перед сравнением, иначе в строке окажется две скобки подряд.
+        add(
+            f"Средний балл: {num(cur.average, 1)} по {cur.scored} оценённым"
+            + delta(cur.average, prev.average, digits=1)
+        )
     add(line("Отсеялись на стоп-вопросах", cur.rejected, prev.rejected))
     for reason, count in sorted(cur.reasons.items(), key=lambda kv: (-kv[1], kv[0])):
         add(f"  причина — {reason}: {count}")
@@ -598,10 +656,15 @@ def numbers_text(cur: WeekStats, prev: WeekStats) -> str:
     blank()
     add("ПО ДНЯМ")
     for row in cur.days:
-        add(
-            f"{fmt_weekday(row.day)}: размещений {row.placements}, "
-            f"касаний {row.outreach_sent}, откликов {row.responses}"
-        )
+        # Нули по незаведённому листу в дневной таблице не показываются: они
+        # означали бы, что в этот день не работали, а это неизвестно.
+        parts = []
+        if cur.placements_tracked:
+            parts.append(f"размещений {row.placements}")
+        if cur.outreach_tracked:
+            parts.append(f"касаний {row.outreach_sent}")
+        parts.append(f"откликов {row.responses}")
+        add(f"{fmt_weekday(row.day)}: " + ", ".join(parts))
     if cur.silent_days:
         add(
             "Дни без единого отклика: "
@@ -609,7 +672,8 @@ def numbers_text(cur: WeekStats, prev: WeekStats) -> str:
         )
     else:
         add("Дней без откликов нет")
-    if cur.idle_days:
+    # Про дни без работы можно говорить только там, где работу учитывают.
+    if cur.tracking_started and cur.idle_days:
         add(
             "Дни без работы — ни размещений, ни касаний: "
             + ", ".join(fmt_weekday(d) for d in cur.idle_days)
@@ -625,10 +689,13 @@ def numbers_text(cur: WeekStats, prev: WeekStats) -> str:
 # канал пуст и в какой день не работали. Человек получает короткую сводку и
 # два коротких раздела выводов — остальное он посмотрит в «Эффективности».
 #
-# Разметка HTML, а не Markdown: таблицы Телеграм не рендерит ни в том, ни в
-# другом, и колонки держатся только пробелами внутри <pre>. Всё, что
-# приходит извне — названия каналов, текст модели, — экранируется: одна
-# угловая скобка в названии канала превратила бы сообщение в ошибку 400.
+# Разметка HTML, и только жирные заголовки разделов. Ни <pre>, ни <code>:
+# Телеграм рисует их блоком кода с кнопкой «копировать» — читать сводку в
+# таком виде неудобно, а выглядит она технической выгрузкой. Поэтому цифры
+# идут обычными строками, по одной мысли на строку, без колонок.
+#
+# Всё, что приходит извне — названия каналов, текст модели, — экранируется:
+# одна угловая скобка в названии канала превратила бы сообщение в ошибку 400.
 
 # Жёсткий потолок сообщения. Телеграм режет на 4096, но нам важна
 # читаемость: отчёт читают с телефона в понедельник утром.
@@ -643,7 +710,7 @@ MONTHS_SHORT = (
     "июл", "авг", "сен", "окт", "ноя", "дек",
 )
 
-UP, DOWN = "↑", "↓"
+DASH = " — "      # между подписью и значением
 DOT = " · "
 ELLIPSIS = "…"
 
@@ -660,10 +727,12 @@ CHANNEL_NAME_LIMIT = 28
 # иначе съел бы весь бюджет, и второго в сообщении не осталось бы вовсе.
 SECTION_LIMIT = 300
 
-LABEL_WIDTH = 13   # ширина колонки с подписью внутри <pre>
-
 NIKA_TITLE = "Нике"
 VACANCY_TITLE = "По вакансии"
+
+# Учёт по этому листу ещё не заведён. Ноль с дельтой на его месте читался бы
+# упрёком человеку, который ещё не начал заполнять таблицу.
+NOT_TRACKED = "учёт ещё не ведётся"
 
 
 def esc(text) -> str:
@@ -693,15 +762,15 @@ def short_days(days: list[date]) -> str:
     return ", ".join(f"{day.day} {MONTHS_SHORT[day.month - 1]}" for day in days)
 
 
-def arrow(current, previous, digits: int = 0) -> str:
-    """Дельта одним знаком: «↓6». Нечего показать — пустая строка.
+def change(current, previous, digits: int = 0) -> str:
+    """Дельта в скобках со знаком: «(+11)». Нечего показать — пусто.
 
-    Ноль дельтой не считается: «↑0» в сводке — шум, а не новость.
+    Ноль дельтой не считается: «(+0)» в сводке — шум, а не новость.
     """
     if current is None or previous is None or current == previous:
         return ""
-    sign = UP if current > previous else DOWN
-    return f" {sign}{num(abs(current - previous), digits)}"
+    sign = "+" if current > previous else MINUS
+    return f" ({sign}{num(abs(current - previous), digits)})"
 
 
 def short_name(text: str, limit: int = CHANNEL_NAME_LIMIT) -> str:
@@ -718,65 +787,77 @@ def listing(items: list[str], limit: int = CHANNELS_IN_LINE) -> str:
 
 
 def plan_tail(plan: int | None) -> str:
-    """«/ 100» рядом с фактом. Плана нет — и хвоста нет."""
-    return f" / {plan}" if plan is not None else ""
+    """«из 100» рядом с фактом. Плана нет — и хвоста нет."""
+    return f" из {plan}" if plan is not None else ""
+
+
+def scored_note(count: int) -> str:
+    """«(по 5 оценённым)». Средний балл считается не по всем откликам, и
+    читать его как среднее по всем — ошибка, которая стоит решений."""
+    one = count % 10 == 1 and count % 100 != 11
+    return f"(по {count} оценённому)" if one else f"(по {count} оценённым)"
+
+
+def work_line(label: str, fact: int, plan: int | None, was: int, tracked: bool) -> str:
+    """Строка сделанной работы: «Размещений — 14 из 100 (+6)».
+
+    Учёт не заведён — вместо числа так и сказано. Ноль с дельтой на этом
+    месте был бы упрёком человеку, который ещё не начал заполнять лист.
+    """
+    if not tracked:
+        return f"{label}{DASH}{NOT_TRACKED}"
+    return f"{label}{DASH}{fact}{plan_tail(plan)}{change(fact, was)}"
 
 
 def numbers_block(cur: WeekStats, prev: WeekStats) -> str:
-    """Цифры недели для <pre>-блока. Колонки держатся пробелами.
+    """Цифры недели обычными строками: по одной мысли на строку.
 
-    Подписи выровнены по LABEL_WIDTH, а числа плана — по самому длинному из
-    трёх, чтобы «/» стояли друг под другом при любых величинах.
+    Колонок и выравнивания здесь нет намеренно: ровнять их пришлось бы в
+    <pre>, а он рисуется блоком кода с кнопкой «копировать» — сводку в
+    таком виде неудобно читать с телефона.
     """
-    # Факты выравниваются по самому длинному из трёх: тогда «/» и скобки
-    # стоят друг под другом при любых величинах.
-    width = max(len(str(f)) for f in (cur.placements, cur.outreach_sent, cur.responses))
-
-    def row(label: str, fact: int, tail: str = "") -> str:
-        return f"{label.ljust(LABEL_WIDTH)}{str(fact).rjust(width)}{tail}"
-
-    sources = [
-        f"каналы {cur.channel_responses}",
-        f"личеки {cur.outreach_responses}",
-    ]
-    # Эти два показываются только когда есть: сумма в скобках обязана
-    # сходиться с общим числом откликов, иначе ей незачем верить.
-    if cur.unlabelled:
-        sources.append(f"без метки {cur.unlabelled}")
-    unknown = sum(cur.unknown_labels.values())
-    if unknown:
-        sources.append(f"чужая метка {unknown}")
-
     lines = [
-        row(
-            "Размещений",
-            cur.placements,
-            plan_tail(cur.plan_placements) + arrow(cur.placements, prev.placements),
+        work_line(
+            "Размещений", cur.placements, cur.plan_placements,
+            prev.placements, cur.placements_tracked,
         ),
-        row(
-            "Личных",
-            cur.outreach_sent,
-            plan_tail(cur.plan_outreach) + arrow(cur.outreach_sent, prev.outreach_sent),
+        work_line(
+            "Личных касаний", cur.outreach_sent, cur.plan_outreach,
+            prev.outreach_sent, cur.outreach_tracked,
         ),
-        row(
-            "Откликов",
-            cur.responses,
-            arrow(cur.responses, prev.responses) + "  (" + DOT.join(sources) + ")",
-        ),
-        "",
     ]
 
     if cur.responses == 0:
-        # Пустая неделя — тоже результат, и сказано об этом прямо.
-        lines.append(NO_RESPONSES_LINE)
+        # Пустая неделя — тоже результат, и сказано об этом прямо. Дельта
+        # здесь не «минус столько-то», а «на прошлой неделе было»: читать
+        # «откликов нет (−29)» пришлось бы дважды.
+        was = f" (было {prev.responses})" if prev.responses else ""
+        lines.append(NO_RESPONSES_LINE + was)
     else:
-        levels = DOT.join(
-            f"{level} {cur.verdicts.get(level, 0)}" for level in ("A", "B", "C")
+        lines.append(f"Откликов{DASH}{cur.responses}{change(cur.responses, prev.responses)}")
+        lines.append("")
+        lines.append(
+            "Из них: "
+            + DOT.join(f"{level} {cur.verdicts.get(level, 0)}" for level in ("A", "B", "C"))
         )
-        if cur.average is not None:
-            levels += DOT + f"средний балл {num(cur.average, 1)}"
-        lines.append(levels)
-        lines.append(f"Отсев на условиях: {cur.rejected}")
+        if cur.scored and cur.average is not None:
+            lines.append(
+                f"Средний балл{DASH}{num(cur.average, 1)} {scored_note(cur.scored)}"
+            )
+        lines.append(f"Отсев на условиях{DASH}{cur.rejected}")
+
+        sources = [
+            f"каналы {cur.channel_responses}",
+            f"личеки {cur.outreach_responses}",
+        ]
+        # Источники обязаны сходиться с общим числом откликов, иначе им
+        # незачем верить: читатель первым делом сложит их в голове.
+        if cur.unlabelled:
+            sources.append(f"без метки {cur.unlabelled}")
+        unknown = sum(cur.unknown_labels.values())
+        if unknown:
+            sources.append(f"чужая метка {unknown}")
+        lines.append("Источники: " + DOT.join(sources))
 
     # Эти две строки печатаются, только если есть что сказать.
     tail = []
@@ -788,7 +869,7 @@ def numbers_block(cur: WeekStats, prev: WeekStats) -> str:
         lines.append("")
         lines += tail
 
-    return "\n".join(lines)
+    return "\n".join(lines).strip("\n")
 
 
 def fit(text: str, budget: int) -> str:
@@ -825,7 +906,7 @@ def message(
     вакансии». Не влезло — раздела в сообщении нет.
     """
     head = f"<b>Подбор {DOT.strip()} {period_title(cur.period)}</b>"
-    body = f"{head}\n\n<pre>{esc(numbers_block(cur, prev))}</pre>"
+    body = f"{head}\n\n{esc(numbers_block(cur, prev))}"
 
     for title, text in ((NIKA_TITLE, nika), (VACANCY_TITLE, vacancy)):
         text = " ".join(str(text or "").split())

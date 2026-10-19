@@ -455,13 +455,12 @@ def test_numbers_are_written_the_russian_way():
 # ------------------------------- сообщение --------------------------------
 #
 # Сообщение читают с телефона в понедельник утром, и форма у него жёсткая:
-# заголовок, цифры в <pre>-блоке с выровненными колонками, два коротких
-# раздела выводов. Потолок — 1500 знаков, и соблюдается он за счёт выводов,
-# а не цифр.
+# заголовок, цифры обычными строками, два коротких раздела выводов. Потолок
+# — 1500 знаков, и соблюдается он за счёт выводов, а не цифр.
 
 @pytest.fixture
 def filled():
-    """Неделя 13–19 октября: три размещения в трёх каналах, два дня личек."""
+    """Неделя 12–18 октября (Пн–Вс): три размещения, два дня личек."""
     posts = read_placements(
         placement_values(
             ["2026-10-14", "Авито", "", ""],
@@ -490,7 +489,7 @@ def filled():
     ]
     responses = report.read_responses(data_values(*rows))
 
-    week = report.Period(date(2026, 10, 13), date(2026, 10, 19))
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
     current = report.stats(week, responses, posts, touches)
     previous = report.stats(week.shifted(-1), responses, posts, touches)
     # Прошлая неделя подделана: нужна дельта в обе стороны.
@@ -502,44 +501,75 @@ def test_message_follows_the_agreed_shape(filled):
     current, previous = filled
     text = report.message(current, previous, "Вывод Нике.", "Вывод по вакансии.")
 
-    assert text.startswith("<b>Подбор · 13–19 октября</b>\n\n<pre>")
+    assert text.startswith("<b>Подбор · 12–18 октября</b>\n\nРазмещений — ")
     assert "<b>Нике</b>\nВывод Нике." in text
     assert "<b>По вакансии</b>\nВывод по вакансии." in text
     # Цифры выше выводов: их читают первыми.
-    assert text.index("</pre>") < text.index("<b>Нике</b>")
+    assert text.index("Откликов — ") < text.index("<b>Нике</b>")
 
 
-def test_numbers_keep_their_columns(filled):
+def test_message_has_no_code_blocks(filled):
+    """<pre> и <code> Телеграм рисует блоком кода с кнопкой «копировать»:
+    сводка выглядит технической выгрузкой и читается хуже."""
     current, previous = filled
-    block = report.numbers_block(current, previous)
-    lines = block.split("\n")
+    text = report.message(current, previous, "вывод", "вывод")
 
-    assert lines[0] == "Размещений    3 / 100 ↓6"
-    assert lines[1] == "Личных       62 / 100 ↑4"
-    assert lines[2] == "Откликов     12 ↓5  (каналы 6 · личеки 6)"
-    # «/» друг под другом — иначе колонки плывут на телефоне.
-    assert lines[0].index("/") == lines[1].index("/")
+    for tag in ("<pre>", "<code>", "```"):
+        assert tag not in text, tag
+    # Из разметки остаются только жирные заголовки разделов.
+    assert set(re.findall(r"</?([a-z]+)>", text)) == {"b"}
+
+
+def test_numbers_go_line_by_line(filled):
+    current, previous = filled
+    lines = report.numbers_block(current, previous).split("\n")
+
+    assert lines[0] == "Размещений — 3 из 100 (−6)"
+    assert lines[1] == "Личных касаний — 62 из 100 (+4)"
+    assert lines[2] == "Откликов — 12 (−5)"
+    assert lines[3] == ""
+    assert lines[4] == "Из них: A 1 · B 4 · C 7"
+    assert "Источники: каналы 6 · личеки 6" in lines
 
 
 def test_delta_shows_up_only_where_there_is_one(filled):
     current, previous = filled
     previous.outreach_sent = current.outreach_sent      # без изменений
     previous.responses = None                           # сравнивать нечего
-    block = report.numbers_block(current, previous)
+    lines = report.numbers_block(current, previous).split("\n")
 
-    assert "Личных       62 / 100\n" in block + "\n", "нулевая дельта — шум"
-    assert "↑" not in block.split("\n")[1] and "↓" not in block.split("\n")[1]
-    assert report.arrow(5, None) == ""
-    assert report.arrow(5, 5) == ""
-    assert report.arrow(14, 20) == " ↓6"
-    assert report.arrow(20, 14) == " ↑6"
+    assert lines[1] == "Личных касаний — 62 из 100", "нулевая дельта — шум"
+    assert lines[2] == "Откликов — 12"
+    assert report.change(5, None) == ""
+    assert report.change(5, 5) == ""
+    assert report.change(14, 20) == " (−6)"
+    assert report.change(20, 14) == " (+6)"
 
 
-def test_levels_and_average_go_on_one_line(filled):
+def test_average_says_how_many_it_covers(filled):
+    """Средний балл считается только по оценённым, а читается как среднее по
+    всем — отсюда и подпись в скобках."""
     current, previous = filled
     block = report.numbers_block(current, previous)
-    assert "A 1 · B 4 · C 7 · средний балл 6,6" in block
-    assert "Отсев на условиях: 1" in block
+
+    assert current.scored == 11
+    assert "Средний балл — 6,6 (по 11 оценённым)" in block
+    assert "Отсев на условиях — 1" in block
+
+
+def test_average_line_is_absent_when_nobody_was_scored(filled):
+    current, previous = filled
+    current.scored, current.average = 0, None
+    assert "Средний балл" not in report.numbers_block(current, previous)
+
+
+@pytest.mark.parametrize(
+    "count,text",
+    [(1, "(по 1 оценённому)"), (2, "(по 2 оценённым)"), (5, "(по 5 оценённым)"),
+     (11, "(по 11 оценённым)"), (21, "(по 21 оценённому)")],
+)
+def test_scored_note_is_declined(count, text):
+    assert report.scored_note(count) == text
 
 
 def test_sources_in_brackets_add_up_to_the_total(filled):
@@ -549,25 +579,31 @@ def test_sources_in_brackets_add_up_to_the_total(filled):
     """
     current, previous = filled
     assert current.responses == 12
-    line = report.numbers_block(current, previous).split("\n")[2]
-    assert sum(int(n) for n in re.findall(r"\d+", line.split("(")[1])) == 12
+    line = next(
+        l for l in report.numbers_block(current, previous).split("\n")
+        if l.startswith("Источники:")
+    )
+    assert sum(int(n) for n in re.findall(r"\d+", line)) == 12
 
     # Отклики без метки и с чужой меткой показываются, только когда есть.
     assert "без метки" not in line
     current.unlabelled = 2
     current.unknown_labels = {"p099": 1}
     current.responses += 3
-    line = report.numbers_block(current, previous).split("\n")[2]
+    line = next(
+        l for l in report.numbers_block(current, previous).split("\n")
+        if l.startswith("Источники:")
+    )
 
     assert "без метки 2" in line and "чужая метка 1" in line
-    assert sum(int(n) for n in re.findall(r"\d+", line.split("(")[1])) == 15
+    assert sum(int(n) for n in re.findall(r"\d+", line)) == 15
 
 
 def test_quiet_sections_are_printed_only_when_there_is_something_to_say(filled):
     current, previous = filled
     block = report.numbers_block(current, previous)
     assert "Пусто: HR чат МСК, Работа в продажах" in block
-    assert "Тишина: 13, 14, 15, 19 окт" in block
+    assert "Тишина: 12, 13, 14, 15 окт" in block
 
     # Все каналы отработали и откликов не было только в один день — строк нет.
     current.channels = []
@@ -588,13 +624,163 @@ def test_long_channel_list_does_not_eat_the_message(filled):
 
 
 def test_empty_week_says_it_plainly():
-    week = report.Period(date(2026, 10, 13), date(2026, 10, 19))
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
     current = report.stats(week, [], [], [])
     previous = report.stats(week.shifted(-1), [], [], [])
     text = report.message(current, previous)
 
     assert report.NO_RESPONSES_LINE in text
-    assert "Тишина: 13, 14, 15, 16, 17, 18, 19 окт" in text
+    assert "Тишина: 12, 13, 14, 15, 16, 17, 18 окт" in text
+    # Ни «Из них», ни «Источники», ни «Отсев»: считать нечего.
+    for absent in ("Из них:", "Источники:", "Отсев"):
+        assert absent not in text, absent
+    assert "\n\n\n" not in text, "пустая строка не должна удваиваться"
+
+
+def test_empty_week_recalls_the_previous_one():
+    """«Откликов нет (−29)» читалось бы дважды — здесь нужен прошлый итог."""
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    current = report.stats(week, [], [], [])
+    previous = report.stats(week.shifted(-1), [], [], [])
+    previous.responses = 29
+
+    assert "Откликов нет (было 29)" in report.numbers_block(current, previous)
+    previous.responses = 0
+    block = report.numbers_block(current, previous)
+    assert "Откликов нет\n" in block + "\n" and "было" not in block
+
+
+# ------------------------ учёт ещё не заведён -----------------------------
+#
+# Пустой лист за всю историю и пустая неделя — разные вещи. В первом случае
+# ноль означает, что таблицу ещё не начали заполнять, и упрекать человека
+# нечем; во втором — что работа не сделана. Путать их нельзя.
+
+def test_empty_sheets_mean_tracking_has_not_started():
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    nothing = report.stats(week, [], [], [])
+
+    assert nothing.placements_tracked is False
+    assert nothing.outreach_tracked is False
+    assert nothing.tracking_started is False
+    assert nothing.untracked == ["Размещения", "Личные касания"]
+
+
+def test_a_single_row_anywhere_means_tracking_has_started():
+    """Строка с прошлого месяца — уже учёт: ноль за эту неделю настоящий."""
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    posts = read_placements(placement_values(["2026-08-01", "Авито", "", ""]))
+    touches = read_outreach(outreach_values(["2026-08-01", 5, "", "", ""]))
+
+    started = report.stats(week, [], posts, touches)
+    assert started.tracking_started is True
+    assert started.untracked == []
+    assert started.placements == 0, "за неделю размещений не было — и это правда"
+
+
+def test_row_without_a_date_still_counts_as_tracking():
+    """Канал заведён, дату не поставили — таблицу уже начали заполнять."""
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    posts = read_placements(placement_values(["", "Авито", "", ""]))
+    assert report.stats(week, [], posts, []).placements_tracked is True
+
+
+def test_untracked_work_is_not_reported_as_zero():
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    current = report.stats(week, [], [], [])
+    previous = report.stats(week.shifted(-1), [], [], [])
+    lines = report.numbers_block(current, previous).split("\n")
+
+    assert lines[0] == f"Размещений — {report.NOT_TRACKED}"
+    assert lines[1] == f"Личных касаний — {report.NOT_TRACKED}"
+    assert "из 100" not in "\n".join(lines[:2]), "плана там, где нет учёта, нет"
+    assert "(+0)" not in "\n".join(lines) and "(−0)" not in "\n".join(lines)
+
+
+def test_one_untracked_sheet_does_not_hide_the_other():
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    posts = read_placements(placement_values(["2026-10-14", "Авито", "", ""]))
+    current = report.stats(week, [], posts, [])
+    previous = report.stats(week.shifted(-1), [], posts, [])
+    lines = report.numbers_block(current, previous).split("\n")
+
+    assert lines[0] == "Размещений — 1 из 100 (+1)", "здесь учёт есть"
+    assert lines[1] == f"Личных касаний — {report.NOT_TRACKED}"
+    assert current.untracked == ["Личные касания"]
+    assert current.tracking_started is False, "учёт заведён не весь"
+
+
+def test_model_gets_the_tracking_flag_explicitly():
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    current = report.stats(week, [], [], [])
+    previous = report.stats(week.shifted(-1), [], [], [])
+    facts = report.numbers_text(current, previous)
+
+    assert "tracking_started: false" in facts
+    assert "пусты за всю историю" in facts
+    assert "отсутствие учёта, а не отсутствие работы" in facts
+    assert f"Размещений: {report.NOT_TRACKED}" in facts
+    assert f"Отправлено: {report.NOT_TRACKED}" in facts
+    # Плана там, где учёта нет, тоже быть не должно: сравнивать нечего.
+    assert "План размещений" not in facts
+    assert "План касаний" not in facts
+
+
+def test_started_tracking_is_flagged_as_true():
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    posts = read_placements(placement_values(["2026-10-14", "Авито", "", ""]))
+    touches = read_outreach(outreach_values(["2026-10-14", 20, "", "", ""]))
+    current = report.stats(week, [], posts, touches)
+    facts = report.numbers_text(current, report.stats(week.shifted(-1), [], posts, touches))
+
+    assert "tracking_started: true" in facts
+    assert "пусты за всю историю" not in facts
+    assert "План размещений: план 100, факт 1" in facts
+
+
+def test_day_table_does_not_claim_idle_days_without_tracking():
+    """«Дни без работы» по пустому листу — упрёк за то, чего не измеряли."""
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    current = report.stats(week, [], [], [])
+    facts = report.numbers_text(current, report.stats(week.shifted(-1), [], [], []))
+
+    assert "Дни без работы" not in facts
+    assert "размещений 0" not in facts and "касаний 0" not in facts
+    assert "Пн 12.10: откликов 0" in facts, "отклики считаются всегда"
+
+
+def test_day_table_is_full_when_tracking_works():
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    posts = read_placements(placement_values(["2026-10-14", "Авито", "", ""]))
+    touches = read_outreach(outreach_values(["2026-10-14", 20, "", "", ""]))
+    current = report.stats(week, [], posts, touches)
+    facts = report.numbers_text(current, report.stats(week.shifted(-1), [], posts, touches))
+
+    assert "Ср 14.10: размещений 1, касаний 20, откликов 0" in facts
+    assert "Дни без работы" in facts
+
+
+def test_average_in_the_model_block_names_its_base():
+    week = report.Period(date(2026, 10, 12), date(2026, 10, 18))
+    current = report.stats(week, [], [], [])
+    current.scored, current.average, current.responses = 5, 9.0, 13
+    facts = report.numbers_text(current, report.stats(week.shifted(-1), [], [], []))
+
+    assert "Средний балл: 9,0 по 5 оценённым" in facts
+    assert ") (" not in facts, "две скобки подряд читать невозможно"
+
+
+def test_prompt_forbids_judging_work_without_tracking():
+    assert "tracking_started" in PROMPT
+    assert "Не делай выводов о работе человека" in PROMPT
+    assert "учёт ещё не начат" in PROMPT
+    # Прежнее правило «работа не велась» должно остаться только для
+    # заведённого учёта — иначе модель упрекнёт человека за пустую таблицу.
+    assert "Размещений нет, а учёт заведён" in PROMPT
+
+
+def test_prompt_warns_about_the_average_base():
+    assert "по сколькам" in PROMPT
 
 
 def test_message_never_goes_over_the_limit(filled):
@@ -657,7 +843,6 @@ def test_outside_text_is_escaped_for_html(filled):
     assert "<b>не</b>" not in text
     # Разметка остаётся только та, которую поставил код.
     assert text.count("<b>") == text.count("</b>") == 2
-    assert text.count("<pre>") == text.count("</pre>") == 1
 
 
 def test_period_title_names_the_month():
@@ -769,8 +954,7 @@ def test_network_failure_of_one_recipient_is_isolated(monkeypatch):
 
 
 def test_message_is_sent_as_html(telegram):
-    """Колонки сводки держатся пробелами в <pre>, и без parse_mode Телеграм
-    показал бы теги как текст."""
+    """Без parse_mode Телеграм показал бы теги заголовков как текст."""
     weekly_report.broadcast("<b>Подбор</b>")
     assert telegram.sent[0]["parse_mode"] == "HTML"
     assert telegram.sent[0]["text"] == "<b>Подбор</b>"
